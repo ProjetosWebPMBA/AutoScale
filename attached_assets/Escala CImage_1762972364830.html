@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gerador de Escala Mensal (v4 - Dias Ignorados)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        
+        /* Estilos de impressão (Fallback para Ctrl+P) */
+        @media print {
+            @page {
+                size: landscape;
+            }
+            #config-panel, #header-title, #pdf-button, #analytics-panel {
+                display: none;
+            }
+            #schedule-panel, #schedule-output, .table-container {
+                width: 100%;
+                margin: 0;
+                padding: 0;
+                box-shadow: none;
+                border: none;
+                overflow: visible;
+            }
+            table {
+                width: 100%;
+                font-size: 8px;
+                border-collapse: collapse !important;
+                page-break-inside: auto;
+            }
+            tr {
+                page-break-inside: avoid;
+                page-break-after: auto;
+            }
+            th, td {
+                border: 1px solid #ccc !important;
+                padding: 4px !important;
+            }
+            thead {
+                display: table-header-group;
+            }
+            tbody {
+                display: table-row-group;
+            }
+            .header-cell {
+                background-color: #f3f4f6 !important;
+                -webkit-print-color-adjust: exact;
+                color-adjust: exact;
+            }
+            .weekend-print {
+                background-color: #e5e5e5 !important;
+                -webkit-print-color-adjust: exact;
+                color-adjust: exact;
+            }
+            /* NOVO: Estilo para dias ignorados na impressão */
+            .ignored-day-print {
+                background-color: #f0f0f0 !important;
+                -webkit-print-color-adjust: exact;
+                color-adjust: exact;
+            }
+            .html-separator-row td {
+                padding: 1px !important;
+                background-color: #fff;
+                border: none !important;
+            }
+        }
+
+        /* NOVO: Estilo para dias ignorados no HTML */
+        .ignored-day-html {
+            background-color: #f3f4f6; /* Cinza claro */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-4 lg:p-8">
+    
+    <div class="max-w-full mx-auto px-4">
+        
+        <div class="flex justify-between items-center mb-6">
+            <h1 id="header-title" class="text-3xl font-bold text-gray-800">Gerador de Escala Mensal</h1>
+            <button id="pdf-button" class="hidden bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                Gerar PDF da Escala
+            </button>
+        </div>
+
+        <!-- MUDANÇA DE LAYOUT: Removido lg:flex-row, agora é sempre flex-col -->
+        <div class="flex flex-col gap-8">
+
+            <!-- MUDANÇA DE LAYOUT: Removido lg:w-1/4 e sticky -->
+            <div id="config-panel" class="w-full bg-white p-6 rounded-lg shadow-lg h-fit">
+                <h2 class="text-xl font-semibold mb-4">Configurações</h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    
+                    <!-- Coluna 1: Alunos -->
+                    <div class="mb-4">
+                        <label for="alunos" class="block text-sm font-medium text-gray-700 mb-1">Alunos (Números)</label>
+                        <textarea id="alunos" rows="12" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74</textarea>
+                    </div>
+
+                    <!-- Coluna 2: Postos e Vagas -->
+                    <div>
+                        <div class="mb-4">
+                            <label for="postos" class="block text-sm font-medium text-gray-700 mb-1">Postos de Serviço (um por linha)</label>
+                            <textarea id="postos" rows="6" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">Aluno de dia
+Cmd da guarda
+sentinelas
+plantões masc
+plantões sala de meios
+serviço de rancho</textarea>
+                        </div>
+
+                        <div class="mb-4">
+                            <label for="vagas" class="block text-sm font-medium text-gray-700 mb-1">Vagas por Posto (um nº por linha)</label>
+                            <textarea id="vagas" rows="6" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">1
+1
+3
+3
+3
+5</textarea>
+                        </div>
+                    </div>
+
+                    <!-- Coluna 3: Responsáveis, Histórico, Geração -->
+                    <div>
+                        <div class="mb-4">
+                            <label for="responsavel" class="block text-sm font-medium text-gray-700 mb-1">Responsável (Nome e Graduação)</label>
+                            <input type="text" id="responsavel" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="Ex: FULANO DE TAL - CAP PM">
+                        </div>
+
+                        <div class="mb-4">
+                            <label for="cargo_responsavel" class="block text-sm font-medium text-gray-700 mb-1">Cargo do Responsável</label>
+                            <input type="text" id="cargo_responsavel" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="Ex: Chefe do Corpo de Alunos">
+                        </div>
+                        
+                        <!-- NOVO CAMPO: Dias a Ignorar -->
+                        <div class="mb-4">
+                            <label for="dias_ignorar" class="block text-sm font-medium text-gray-700 mb-1">Dias a Ignorar (ex: 1, 15, 21)</label>
+                            <input type="text" id="dias_ignorar" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="1, 15, 21, 25">
+                        </div>
+
+                        <button id="save-data" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 mb-4">
+                            Salvar Listas (no Navegador)
+                        </button>
+                        <p id="save-feedback" class="text-xs text-green-600 text-center mb-4"></p>
+                    </div>
+
+                </div> <!-- Fim do grid -->
+
+                <!-- Seção de Histórico e Geração (agora em linha) -->
+                <div class="mt-6 pt-4 border-t border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <h3 class="text-lg font-medium mb-3">Histórico de Progressão</h3>
+                        <p class="text-xs text-gray-600 mb-3">Exporte a ordem final dos alunos após gerar uma escala para importar no próximo mês, garantindo a rotação justa.</p>
+                        
+                        <button id="export-data" class="w-full bg-gray-700 text-white py-2 px-4 rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 mb-3">
+                            Exportar Progressão (JSON)
+                        </button>
+                        
+                        <input type="file" id="import-file" class="hidden" accept=".json">
+                        <label for="import-file" class="w-full bg-white border border-gray-400 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-300 mb-2 cursor-pointer text-center block">
+                            Importar Progressão (JSON)
+                        </label>
+                        
+                        <button id="clear-data" class="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 mt-3">
+                            Limpar Memória (Resetar App)
+                        </button>
+                        
+                        <p id="import-export-feedback" class="text-xs text-green-600 text-center mt-2"></p>
+                    </div>
+
+                    <div>
+                        <h3 class="text-lg font-medium mb-3">Gerar Escala</h3>
+                        <div class="flex gap-4">
+                            <div class="w-1/2">
+                                <label for="mes" class="block text-sm font-medium text-gray-700">Mês</label>
+                                <select id="mes" class="w-full p-2 mt-1 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="0">Janeiro</option>
+                                    <option value="1">Fevereiro</option>
+                                    <option value="2">Março</option>
+                                    <option value="3">Abril</option>
+                                    <option value="4">Maio</option>
+                                    <option value="5">Junho</option>
+                                    <option value="6">Julho</option>
+                                    <option value="7">Agosto</option>
+                                    <option value="8">Setembro</option>
+                                    <option value="9">Outubro</option>
+                                    <option value="10">Novembro</option>
+                                    <option value="11">Dezembro</option>
+                                </select>
+                            </div>
+                            <div class="w-1/2">
+                                <label for="ano" class="block text-sm font-medium text-gray-700">Ano</label>
+                                <input type="number" id="ano" class="w-full p-2 mt-1 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" value="2024">
+                            </div>
+                        </div>
+                        <button id="generate-schedule" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 mt-4">
+                            Gerar Escala
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- MUDANÇA DE LAYOUT: Removido lg:w-3/4 -->
+            <div id="schedule-panel" class="w-full">
+                <div id="schedule-output" class="min-h-[300px]">
+                    <p class="text-gray-500 bg-white p-6 rounded-lg shadow-lg">Configurações carregadas. Clique em "Gerar Escala" para começar.</p>
+                </div>
+
+                <div id="analytics-panel" class="bg-white p-6 rounded-lg shadow-lg mt-8">
+                     <h2 class="text-xl font-semibold mb-4 text-gray-500">Análise da Escala</h2>
+                     <p class="text-gray-500">Gere uma escala para ver as estatísticas de distribuição.</p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // Inicializa o jsPDF
+        const { jsPDF } = window.jspdf;
+
+        const diasDaSemana = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+        const nomesDosMeses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+
+        // Elementos da DOM
+        const alunosTextarea = document.getElementById('alunos');
+        const postosTextarea = document.getElementById('postos');
+        const vagasTextarea = document.getElementById('vagas'); 
+        const responsavelInput = document.getElementById('responsavel'); 
+        const cargoResponsavelInput = document.getElementById('cargo_responsavel'); 
+        const diasIgnorarInput = document.getElementById('dias_ignorar'); // NOVO ELEMENTO
+        const saveDataButton = document.getElementById('save-data');
+        const saveFeedback = document.getElementById('save-feedback');
+        const mesSelect = document.getElementById('mes');
+        const anoInput = document.getElementById('ano');
+        const generateButton = document.getElementById('generate-schedule');
+        const scheduleOutput = document.getElementById('schedule-output');
+        const analyticsOutput = document.getElementById('analytics-panel');
+        const pdfButton = document.getElementById('pdf-button'); 
+
+        // === NOVOS ELEMENTOS DOM (Importar/Exportar/Limpar) ===
+        const exportButton = document.getElementById('export-data');
+        const importInput = document.getElementById('import-file');
+        const clearDataButton = document.getElementById('clear-data'); // Botão Limpar
+        const importExportFeedback = document.getElementById('import-export-feedback');
+
+        // Variáveis Globais
+        let scheduleTitle = '';
+        let diasNoMes = 0; 
+        let scheduleData = {}; 
+        const diasDaSemanaIniciais = ["D", "S", "T", "Q", "Q", "S", "S"];
+        let globalPostoVagasRows = [];
+        let globalAllDaysPDF = [];
+        let globalIgnoredDays = new Set(); // NOVO GLOBAL
+        
+        // === VARIÁVEIS GLOBAIS (para Exportação v3) ===
+        let lastGeneratedAlunosList = []; 
+        let lastGeneratedFilas = {};      
+        let lastGeneratedIndices = {};    
+        let lastGeneratedPostos = '';     
+        let lastGeneratedVagas = '';      
+
+        // --- Lógica de Persistência (Salvar/Carregar no Navegador) ---
+        document.addEventListener('DOMContentLoaded', () => {
+            alunosTextarea.value = localStorage.getItem('escala_alunos') || alunosTextarea.value;
+            postosTextarea.value = localStorage.getItem('escala_postos') || postosTextarea.value;
+            vagasTextarea.value = localStorage.getItem('escala_vagas') || vagasTextarea.value; 
+            responsavelInput.value = localStorage.getItem('escala_responsavel') || ''; 
+            cargoResponsavelInput.value = localStorage.getItem('escala_cargo_responsavel') || 'Chefe do Corpo de Alunos'; 
+            diasIgnorarInput.value = localStorage.getItem('escala_dias_ignorar') || ''; // NOVO
+            
+            const hoje = new Date();
+            mesSelect.value = hoje.getMonth();
+            anoInput.value = hoje.getFullYear();
+        });
+
+        saveDataButton.addEventListener('click', () => {
+            localStorage.setItem('escala_alunos', alunosTextarea.value);
+            localStorage.setItem('escala_postos', postosTextarea.value);
+            localStorage.setItem('escala_vagas', vagasTextarea.value); 
+            localStorage.setItem('escala_responsavel', responsavelInput.value); 
+            localStorage.setItem('escala_cargo_responsavel', cargoResponsavelInput.value); 
+            localStorage.setItem('escala_dias_ignorar', diasIgnorarInput.value); // NOVO
+            saveFeedback.textContent = 'Listas salvas com sucesso!';
+            setTimeout(() => { saveFeedback.textContent = ''; }, 3000);
+        });
+        
+        // --- NOVA LÓGICA (Limpar Memória) ---
+        clearDataButton.addEventListener('click', () => {
+            localStorage.removeItem('escala_alunos');
+            localStorage.removeItem('escala_postos');
+            localStorage.removeItem('escala_vagas');
+            localStorage.removeItem('escala_responsavel');
+            localStorage.removeItem('escala_cargo_responsavel');
+            localStorage.removeItem('escala_dias_ignorar'); // NOVO
+            
+            importExportFeedback.textContent = 'Memória limpa. Recarregando...';
+            importExportFeedback.className = 'text-xs text-blue-600 text-center';
+            
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+        });
+
+
+        // --- NOVA FUNÇÃO HELPER (Identifica a Sala) ---
+        const getClasse = (aluno) => {
+            const num = parseInt(aluno, 10);
+            if (isNaN(num)) return 'N/A';
+            
+            if (num >= 1 && num <= 25) return 'A';
+            if (num >= 26 && num <= 50) return 'B';
+            if (num >= 51 && num <= 74) return 'C';
+            return 'N/A';
+        };
+
+        // --- Lógica de Geração da Escala (MODIFICADA V4) ---
+        generateButton.addEventListener('click', () => {
+            // 1. Obter e limpar os dados de entrada
+            const alunos = alunosTextarea.value.split('\n').filter(Boolean).map(s => s.trim());
+            const postos = postosTextarea.value.split('\n').filter(Boolean).map(s => s.trim().toUpperCase());
+            const vagas = vagasTextarea.value.split('\n').filter(Boolean).map(s => parseInt(s.trim(), 10)); 
+            
+            // NOVO: Obter dias a ignorar
+            const diasIgnorarStr = diasIgnorarInput.value.replace(/ /g, ''); // Remove espaços
+            globalIgnoredDays = new Set(
+                diasIgnorarStr.split(',')
+                    .map(d => parseInt(d.trim(), 10))
+                    .filter(d => !isNaN(d) && d > 0 && d <= 31)
+            );
+
+            const mes = parseInt(mesSelect.value, 10);
+            const ano = parseInt(anoInput.value, 10);
+
+            // === Armazena o estado inicial para exportação ===
+            lastGeneratedAlunosList = alunos.slice(); 
+            lastGeneratedPostos = postosTextarea.value;
+            lastGeneratedVagas = vagasTextarea.value;
+            lastGeneratedFilas = {};    
+            lastGeneratedIndices = {};  
+            importExportFeedback.textContent = ''; 
+
+            // 2. Validação
+            if (alunos.length === 0 || postos.length === 0 || vagas.length === 0) {
+                scheduleOutput.innerHTML = '<p class="text-red-600 font-medium">Erro: As listas de Alunos, Postos e Vagas não podem estar vazias.</p>';
+                return;
+            }
+            if (postos.length !== vagas.length) {
+                scheduleOutput.innerHTML = `<p class="text-red-600 font-medium">Erro: O número de linhas em "Postos" (${postos.length}) não é igual ao número de linhas em "Vagas" (${vagas.length}).</p>`;
+                return;
+            }
+            if (vagas.some(isNaN)) {
+                scheduleOutput.innerHTML = '<p class="text-red-600 font-medium">Erro: O campo "Vagas por Posto" deve conter apenas números, um por linha.</p>';
+                return;
+            }
+            const alunosInvalidos = alunos.filter(a => getClasse(a) === 'N/A');
+            if (alunosInvalidos.length > 0) {
+                 scheduleOutput.innerHTML = `<p class="text-red-600 font-medium">Erro: Os seguintes alunos não são numéricos ou estão fora das faixas (1-74): ${alunosInvalidos.join(', ')}</p>`;
+                return;
+            }
+
+
+            // 3. Inicialização
+            scheduleData = {}; 
+            analyticsOutput.innerHTML = ''; 
+            pdfButton.classList.remove('hidden'); 
+            scheduleTitle = `${nomesDosMeses[mes].toUpperCase()} / ${ano}`; 
+
+            // Criar Linhas de Vagas
+            globalPostoVagasRows = [];
+            const postoVagasMap = []; 
+            for (let i = 0; i < postos.length; i++) {
+                const postoNome = postos[i];
+                const numVagas = vagas[i];
+                
+                if (numVagas === 1) {
+                    globalPostoVagasRows.push(postoNome);
+                    postoVagasMap.push({ rowName: postoNome, baseName: postoNome });
+                } else {
+                    for (let j = 1; j <= numVagas; j++) {
+                        const rowName = `${postoNome} (${j}/${numVagas})`;
+                        globalPostoVagasRows.push(rowName);
+                        postoVagasMap.push({ rowName: rowName, baseName: postoNome });
+                    }
+                }
+            }
+
+            // Objeto de estatísticas (individuais)
+            const stats = {};
+            alunos.forEach(aluno => {
+                stats[aluno] = { totalTurnos: 0, totalFolgas: 0, postos: {} };
+                postos.forEach(posto => { stats[aluno].postos[posto] = 0; });
+            });
+
+            // Estrutura de dados
+            globalPostoVagasRows.forEach(rowName => {
+                scheduleData[rowName] = {}; 
+            });
+
+            // === LÓGICA DE FILAS (v3) ===
+            const filaA = alunos.filter(a => getClasse(a) === 'A');
+            const filaB = alunos.filter(a => getClasse(a) === 'B');
+            const filaC = alunos.filter(a => getClasse(a) === 'C');
+            
+            if (filaA.length === 0 || filaB.length === 0 || filaC.length === 0) {
+                 scheduleOutput.innerHTML = `<p class="text-red-600 font-medium">Erro: A lista de alunos deve conter membros de todas as 3 salas (A, B, C) para o balanceamento funcionar.</p>`;
+                return;
+            }
+
+            let indexA = 0;
+            let indexB = 0;
+            let indexC = 0;
+            const classPickOrder = ['A', 'B', 'C'];
+            const statsDiarios = [];
+            
+            // NOVO (v4): Índice de rotação de sala (para o aluno extra)
+            let classStartIndex = 0;
+
+            diasNoMes = new Date(ano, mes + 1, 0).getDate(); 
+            
+            const allDays = []; 
+            globalAllDaysPDF = [];
+            for (let dia = 1; dia <= diasNoMes; dia++) {
+                const data = new Date(ano, mes, dia);
+                const diaSemana = data.getDay();
+                allDays.push({ 
+                    day: dia, 
+                    diaSemanaInicial: diasDaSemanaIniciais[diaSemana],
+                    diaSemana: diaSemana
+                });
+                globalAllDaysPDF.push({ dia: dia, diaSemana: diaSemana });
+            }
+
+            // 4. Loop de Geração de DADOS (MODIFICADO V4)
+            for (let dia = 1; dia <= diasNoMes; dia++) {
+                const alunosEscaladosHoje = new Set();
+                const statsHoje = { A: 0, B: 0, C: 0 }; 
+
+                // NOVO (v4): Pular dia se estiver na lista de ignorados
+                if (globalIgnoredDays.has(dia)) {
+                    statsDiarios.push(statsHoje); // Adiciona stats zeradas
+                    // Não calcular folgas individuais (dia de folga geral)
+                    continue; 
+                }
+
+                for (let i = 0; i < postoVagasMap.length; i++) {
+                    const rowName = postoVagasMap[i].rowName;
+                    const basePostoName = postoVagasMap[i].baseName;
+                    
+                    // NOVO (v4): Rotação do índice inicial
+                    const classIndex = (classStartIndex + i) % classPickOrder.length;
+                    const classeSorteada = classPickOrder[classIndex];
+                    
+                    let alunoDesignado;
+                    let classeAluno;
+
+                    if (classeSorteada === 'A') {
+                        alunoDesignado = filaA[indexA];
+                        indexA = (indexA + 1) % filaA.length;
+                        classeAluno = 'A';
+                    } else if (classeSorteada === 'B') {
+                        alunoDesignado = filaB[indexB];
+                        indexB = (indexB + 1) % filaB.length;
+                        classeAluno = 'B';
+                    } else { // 'C'
+                        alunoDesignado = filaC[indexC];
+                        indexC = (indexC + 1) % filaC.length;
+                        classeAluno = 'C';
+                    }
+                    
+                    statsHoje[classeAluno]++; 
+                    scheduleData[rowName][dia] = alunoDesignado;
+                    alunosEscaladosHoje.add(alunoDesignado);
+
+                    stats[alunoDesignado].totalTurnos++;
+                    stats[alunoDesignado].postos[basePostoName]++;
+                }
+                
+                statsDiarios.push(statsHoje); 
+
+                // NOVO (v4): Atualiza o índice de rotação de sala para o PRÓXIMO dia
+                classStartIndex = (classStartIndex + postoVagasMap.length) % classPickOrder.length;
+
+                // Calcular Folgas (só executa se o dia não foi ignorado)
+                alunos.forEach(aluno => {
+                    if (!alunosEscaladosHoje.has(aluno)) {
+                        stats[aluno].totalFolgas++;
+                    }
+                });
+            }
+
+            // === Salva os índices e filas finais para exportação (v3) ===
+            lastGeneratedFilas = { A: filaA, B: filaB, C: filaC };
+            lastGeneratedIndices = { A: indexA, B: indexB, C: indexC };
+            importExportFeedback.textContent = 'Escala gerada. Você já pode exportar a progressão.';
+            importExportFeedback.className = 'text-xs text-blue-600 text-center';
+
+            // 5. Gerar a Tabela HTML (MODIFICADO V4)
+            let tableHtml = `<h2 class="text-2xl font-semibold mb-4">${scheduleTitle}</h2>
+                             <div class="table-container overflow-x-auto bg-white p-4 rounded-lg shadow-lg">
+                                <table id="schedule-table" class="min-w-full border-collapse border border-gray-300">`;
+            
+            // CABEÇALHO (Inalterado)
+            tableHtml += `<thead class="bg-gray-100">
+                            <tr>
+                                <th class="header-cell border border-gray-300 p-2 text-left text-sm font-semibold text-gray-700 sticky left-0 z-10 bg-gray-100 align-middle" rowspan="3">Posto</th>
+                                <th class="header-cell border border-gray-300 p-2 text-center text-sm font-semibold text-gray-700" colspan="${allDays.length}">DIAS DO MÊS</th>
+                            </tr>
+                            <tr>`;
+            allDays.forEach(d => {
+                const isWeekend = (d.diaSemana === 0 || d.diaSemana === 6);
+                const isIgnored = globalIgnoredDays.has(d.day);
+                let weekendClass = isWeekend ? 'bg-gray-300' : '';
+                if (isIgnored) weekendClass = 'bg-gray-400'; // Mais escuro para ignorado
+                
+                tableHtml += `<th class="header-cell border border-gray-300 p-1 text-center text-xs font-semibold text-gray-600 ${weekendClass}">${d.diaSemanaInicial}</th>`;
+            });
+            tableHtml += `</tr><tr>`;
+            allDays.forEach(d => {
+                const isWeekend = (d.diaSemana === 0 || d.diaSemana === 6);
+                const isIgnored = globalIgnoredDays.has(d.day);
+                let weekendClass = isWeekend ? 'bg-gray-300' : '';
+                if (isIgnored) weekendClass = 'bg-gray-400';
+                
+                tableHtml += `<th class="header-cell border border-gray-300 p-2 text-center text-sm font-semibold text-gray-700 ${weekendClass}">
+                                ${String(d.day).padStart(2, '0')}
+                              </th>`;
+            });
+            tableHtml += `</tr></thead>`;
+
+            // Corpo da Tabela (MODIFICADO V4)
+            tableHtml += `<tbody>`;
+            globalPostoVagasRows.forEach((rowName, index) => { 
+                if (index > 0) {
+                    const getBasePost = (name) => name.split(' (')[0];
+                    const currentRowBase = getBasePost(rowName);
+                    const prevRowBase = getBasePost(globalPostoVagasRows[index - 1]);
+                    
+                    if (currentRowBase !== prevRowBase) {
+                        tableHtml += `<tr class="bg-white html-separator-row">
+                                        <td class="p-0.5 border-b border-gray-300" colspan="${allDays.length + 1}"></td>
+                                      </tr>`;
+                    }
+                }
+
+                tableHtml += `<tr class="hover:bg-gray-50">
+                                <td class="border border-gray-300 p-2 text-sm font-medium text-gray-800 sticky left-0 z-10 bg-white">${rowName}</td>`;
+                
+                allDays.forEach(d => {
+                    const isWeekend = (d.diaSemana === 0 || d.diaSemana === 6);
+                    const isIgnored = globalIgnoredDays.has(d.day);
+                    
+                    let cellClass = isWeekend ? 'bg-gray-200' : '';
+                    let dayData = scheduleData[rowName][d.day] || '';
+                    
+                    // NOVO (v4): Lógica do dia ignorado
+                    if (isIgnored) {
+                        cellClass = 'ignored-day-html'; // Classe de dia ignorado
+                        dayData = '-'; // Marcação visual
+                    }
+                    
+                    tableHtml += `<td class="border border-gray-300 p-2 text-center text-sm text-gray-700 font-medium align-middle ${cellClass}">${dayData}</td>`;
+                });
+
+                tableHtml += `</tr>`;
+            });
+            tableHtml += `</tbody></table></div>`;
+            scheduleOutput.innerHTML = tableHtml;
+
+
+            // 6. Gerar Análise (Estatísticas) (MODIFICADO V3)
+            analyticsOutput.innerHTML = `<h2 class="text-xl font-semibold mb-4">Análise de Distribuição</h2>`;
+            
+            // Tabela 1: Estatísticas Individuais
+            let statsTable = `<h3 class="text-lg font-semibold mb-2 text-gray-700">Contagem Individual</h3>
+                              <div class="overflow-x-auto mb-6">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aluno</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Turnos</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Folgas</th>
+                                        ${postos.map(p => `<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" title="${p}">${p.substring(0, 15)}...</th>`).join('')}
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">`;
+            
+            for (const aluno of alunos) {
+                statsTable += `<tr>
+                                <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">${aluno}</td>
+                                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700 font-bold">${stats[aluno].totalTurnos}</td>
+                                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">${stats[aluno].totalFolgas}</td>
+                                ${postos.map(p => `<td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">${stats[aluno].postos[p]}</td>`).join('')}
+                              </tr>`;
+            }
+            statsTable += `</tbody></table></div>`;
+            analyticsOutput.innerHTML += statsTable;
+
+            // Tabela 2: Estatísticas Diárias por Sala
+            let dailyStatsTable = `<h3 class="text-lg font-semibold mb-2 text-gray-700">Distribuição Diária por Sala</h3>
+                                    <div class="overflow-x-auto">
+                                    <table class="min-w-full divide-y divide-gray-200">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dia</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sala A</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sala B</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sala C</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">`;
+            
+            statsDiarios.forEach((statsDia, index) => {
+                const dia = index + 1;
+                const isIgnored = globalIgnoredDays.has(dia);
+                const rowClass = isIgnored ? 'bg-gray-100 text-gray-400' : '';
+                
+                dailyStatsTable += `<tr class="${rowClass}">
+                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium ${isIgnored ? '' : 'text-gray-900'}">${String(dia).padStart(2, '0')} ${isIgnored ? '(Ignorado)' : ''}</td>
+                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-bold">${statsDia.A}</td>
+                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-bold">${statsDia.B}</td>
+                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-bold">${statsDia.C}</td>
+                                  </tr>`;
+            });
+            
+            dailyStatsTable += `</tbody></table></div>`;
+            analyticsOutput.innerHTML += dailyStatsTable;
+
+        });
+
+        // --- LÓGICA DE GERAÇÃO DE PDF (MODIFICADO V4) ---
+        pdfButton.addEventListener('click', () => {
+            const responsavel = responsavelInput.value.trim(); 
+            const cargoResponsavel = cargoResponsavelInput.value.trim(); 
+
+            if (globalPostoVagasRows.length === 0) {
+                alert("Por favor, gere uma escala primeiro.");
+                return;
+            }
+            if (!responsavel) {
+                alert("Por favor, preencha o campo 'Responsável (Nome e Graduação)' antes de gerar o PDF.");
+                responsavelInput.focus();
+                return;
+            }
+            if (!cargoResponsavel) {
+                alert("Por favor, preencha o campo 'Cargo do Responsável' antes de gerar o PDF.");
+                cargoResponsavelInput.focus();
+                return;
+            }
+
+            const doc = new jsPDF({
+                orientation: 'landscape',
+                unit: 'pt',
+                format: 'a4'
+            });
+
+            doc.setFont('Inter', 'normal'); 
+
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const margin = 40;
+
+            // VISTO
+            const vistoBoxWidth = 130; 
+            const vistoBoxHeight = 100; 
+            const vistoBoxX = margin - 2;
+            const vistoBoxY = 40;
+            const vistoTextCenter = vistoBoxX + (vistoBoxWidth / 2); 
+
+            doc.setLineWidth(1); 
+            doc.rect(vistoBoxX, vistoBoxY, vistoBoxWidth, vistoBoxHeight); 
+            doc.setFontSize(9);
+            doc.setFont(undefined, 'bold');
+            doc.text('VISTO:', vistoTextCenter, 55, { align: 'center' }); 
+            doc.setFont(undefined, 'normal');
+            doc.text('Em ___ / ___ / ______', vistoTextCenter, 75, { align: 'center' }); 
+            const sigLineWidth = 80;
+            const sigLineX1 = vistoTextCenter - (sigLineWidth / 2);
+            const sigLineX2 = vistoTextCenter + (sigLineWidth / 2);
+            doc.setLineWidth(0.5); 
+            doc.line(sigLineX1, 105, sigLineX2, 105); 
+            doc.text('Cmt da OPM', vistoTextCenter, 120, { align: 'center' }); 
+            doc.setLineWidth(1); 
+            
+            // CABEÇALHO
+            const headerY = 50; 
+            const lineSpacing = 15; 
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'bold');
+            doc.text('POLÍCIA MILITAR DA BAHIA', pageWidth / 2, headerY, { align: 'center' });
+            doc.text('CENTRO DE FORMAÇÃO E APERFEIÇOAMENTO DE PRAÇAS', pageWidth / 2, headerY + lineSpacing, { align: 'center' });
+            doc.text('9º BATALHÃO DE ENSINO, INSTRUÇÃO E CAPACITAÇÃO', pageWidth / 2, headerY + (lineSpacing * 2), { align: 'center' });
+            doc.setFont(undefined, 'normal');
+
+            // TÍTULO
+            const titleY = headerY + (lineSpacing * 2) + 16;
+            doc.setFontSize(14); 
+            doc.setFont(undefined, 'bold');
+            doc.text('ESCALA GERAL', pageWidth / 2, titleY, { align: 'center', decoration: 'underline' });
+            doc.setFontSize(12);
+            doc.setFont(undefined, 'normal');
+            doc.setTextColor(255, 0, 0); 
+            doc.text(scheduleTitle, pageWidth / 2, titleY + 17, { align: 'center' });
+            doc.setTextColor(0, 0, 0); 
+            
+            const headerIniciais = [];
+            const headerDias = [];
+            globalAllDaysPDF.forEach(dayInfo => {
+                headerIniciais.push(diasDaSemanaIniciais[dayInfo.diaSemana]);
+                headerDias.push(String(dayInfo.dia).padStart(2, '0'));
+            });
+
+            // Cabeçalho Manual
+            const tableHead = [
+                [
+                    { content: 'Posto', rowSpan: 3, styles: { valign: 'middle', halign: 'left', fontStyle: 'bold' } },
+                    { content: 'DIAS DO MÊS', colSpan: diasNoMes, styles: { halign: 'center', fontStyle: 'bold', fontSize: 9 } }
+                ],
+                headerIniciais,
+                headerDias
+            ];
+            
+            const totalAvailableWidthForDays = pageWidth - (margin * 2) - 130;
+            let dayColumnWidth = 22; 
+            if (diasNoMes === 31) {
+                dayColumnWidth = 20.3;
+            } else if (diasNoMes === 30) {
+                dayColumnWidth = 21;
+            } else if (diasNoMes === 29) {
+                dayColumnWidth = 21.7;
+            } else { // 28 dias
+                dayColumnWidth = 22.5;
+            }
+
+            const columnStyles = {
+                0: { halign: 'left', fontStyle: 'bold', cellWidth: 130, valign: 'middle' }
+            };
+            for (let i = 1; i <= diasNoMes; i++) {
+                columnStyles[i] = {
+                    cellWidth: dayColumnWidth,
+                    halign: 'center',
+                    valign: 'middle'
+                };
+            }
+
+            const tableY = 145; 
+            
+            doc.autoTable({
+                head: tableHead,
+                startY: tableY,
+                theme: 'grid',
+                styles: { 
+                    fontSize: 8,
+                    cellPadding: 3,
+                    lineColor: [150, 150, 150],
+                    lineWidth: 0.5,
+                },
+                headStyles: {
+                    fillColor: [240, 240, 240],
+                    textColor: [50, 50, 50],
+                    fontStyle: 'bold',
+                    fontSize: 8,
+                    halign: 'center',
+                    valign: 'middle',
+                    cellPadding: 2
+                },
+                columnStyles: columnStyles,
+                didParseCell: (data) => {
+                    let isWeekend = false;
+                    let isIgnored = false; // NOVO
+                    let dayInfo;
+                    
+                    if (data.column.index > 0) {
+                        dayInfo = globalAllDaysPDF[data.column.index - 1];
+                        if (dayInfo) {
+                           if (dayInfo.diaSemana === 0 || dayInfo.diaSemana === 6) {
+                                isWeekend = true;
+                           }
+                           if (globalIgnoredDays.has(dayInfo.dia)) { // NOVO
+                                isIgnored = true;
+                           }
+                        }
+                    }
+
+                    if (isIgnored) { // NOVO: Prioridade
+                         data.cell.styles.fillColor = [210, 210, 210]; // Cinza dos findes
+                    } else if (isWeekend) {
+                        data.cell.styles.fillColor = [210, 210, 210];
+                    }
+                    
+                    if (data.section === 'head' && data.row.index === 1) {
+                        data.cell.styles.fontSize = 7;
+                        data.cell.styles.fontStyle = 'normal';
+                        if (!isWeekend && !isIgnored) { // Modificado
+                            data.cell.styles.fillColor = [250, 250, 250];
+                        }
+                    }
+                }
+            });
+
+            // Renderizar o CORPO (MODIFICADO V4)
+            let currentY = doc.lastAutoTable.finalY;
+            const basePostos = postosTextarea.value.split('\n').filter(Boolean).map(s => s.trim().toUpperCase());
+            const getBasePost = (name) => name.split(' (')[0];
+
+            basePostos.forEach(basePost => {
+                const tableBody = [];
+                globalPostoVagasRows.forEach((rowName) => {
+                    if (getBasePost(rowName) === basePost) {
+                        const row = [rowName];
+                        for (let dia = 1; dia <= diasNoMes; dia++) {
+                            // NOVO (v4): Verifica se o dia é ignorado
+                            if (globalIgnoredDays.has(dia)) {
+                                row.push('-'); // Adiciona traço
+                            } else {
+                                const cellData = scheduleData[rowName][dia] || '';
+                                row.push(cellData);
+                            }
+                        }
+                        tableBody.push(row);
+                    }
+                });
+
+                doc.autoTable({
+                    body: tableBody,
+                    startY: currentY,
+                    theme: 'grid',
+                    styles: {
+                        fontSize: 8,
+                        cellPadding: 3,
+                        lineColor: [150, 150, 150],
+                        lineWidth: 0.5,
+                    },
+                    bodyStyles: {
+                        textColor: [0, 0, 0],
+                        valign: 'middle',
+                        halign: 'center'
+                    },
+                    columnStyles: columnStyles,
+                    didParseCell: (data) => {
+                        let isWeekend = false;
+                        let isIgnored = false; // NOVO
+                        let dayInfo;
+                        
+                        if (data.column.index > 0) {
+                             dayInfo = globalAllDaysPDF[data.column.index - 1];
+                            if (dayInfo) {
+                               if (dayInfo.diaSemana === 0 || dayInfo.diaSemana === 6) {
+                                    isWeekend = true;
+                               }
+                               if (globalIgnoredDays.has(dayInfo.dia)) { // NOVO
+                                    isIgnored = true;
+                               }
+                            }
+                        }
+                        
+                        if (isIgnored) { // NOVO: Prioridade
+                             data.cell.styles.fillColor = [235, 235, 235]; // Cinza claro
+                        } else if (isWeekend) {
+                            data.cell.styles.fillColor = [235, 235, 235];
+                        }
+                    }
+                });
+                currentY = doc.lastAutoTable.finalY;
+                currentY += 3;
+            });
+
+            // RODAPÉ DE ASSINATURA
+            let footerY = currentY + 25; 
+
+            if (footerY > doc.internal.pageSize.getHeight() - 60) {
+                doc.addPage();
+                footerY = 60; 
+            }
+            
+            const centerWidth = pageWidth / 2;
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'bold');
+            doc.text(responsavel.toUpperCase(), centerWidth, footerY, { align: 'center' });
+            doc.setFont(undefined, 'italic');
+            doc.text(cargoResponsavel, centerWidth, footerY + 15, { align: 'center' });
+            doc.setFont(undefined, 'normal'); 
+
+            // Salva o arquivo PDF
+            const mesParaNomeArquivo = parseInt(mesSelect.value, 10) + 1;
+            const anoParaNomeArquivo = anoInput.value;
+            doc.save(`escala_${anoParaNomeArquivo}_${String(mesParaNomeArquivo).padStart(2, '0')}.pdf`);
+        });
+
+        // ================================================
+        // === LÓGICA DE IMPORTAR/EXPORTAR (v3 - Inalterada) ===
+        // ================================================
+
+        /**
+         * Evento de clique para o botão EXPORTAR (MODIFICADO V3)
+         */
+        exportButton.addEventListener('click', () => {
+            if (!lastGeneratedFilas.A || !lastGeneratedIndices.A) {
+                importExportFeedback.textContent = 'Gere uma escala primeiro para poder exportar.';
+                importExportFeedback.className = 'text-xs text-red-600 text-center';
+                return;
+            }
+
+            const { A: filaA, B: filaB, C: filaC } = lastGeneratedFilas;
+            const { A: indexA, B: indexB, C: indexC } = lastGeneratedIndices;
+
+            const rotatedA = filaA.slice(indexA).concat(filaA.slice(0, indexA));
+            const rotatedB = filaB.slice(indexB).concat(filaB.slice(0, indexB));
+            const rotatedC = filaC.slice(indexC).concat(filaC.slice(0, indexC));
+            
+            const alunosProximoMes = [
+                ...rotatedA,
+                ...rotatedB,
+                ...rotatedC
+            ];
+
+            const exportData = {
+                tipo: "configuracao_escala_pm", 
+                dataExportacao: new Date().toISOString(),
+                alunosProximoMes: alunosProximoMes, 
+                postos: lastGeneratedPostos,     
+                vagas: lastGeneratedVagas,       
+                responsavel: responsavelInput.value,
+                cargo_responsavel: cargoResponsavelInput.value,
+                // Nota: Não precisamos exportar os dias ignorados,
+                // pois eles mudam de mês para mês.
+            };
+
+            const dataStr = JSON.stringify(exportData, null, 2); 
+            const blob = new Blob([dataStr], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            
+            const mesAtual = parseInt(mesSelect.value, 10);
+            const anoAtual = parseInt(anoInput.value, 10);
+            const proximaData = new Date(anoAtual, mesAtual + 1, 1);
+            const proxMes = String(proximaData.getMonth() + 1).padStart(2, '0');
+            const proxAno = proximaData.getFullYear();
+
+            a.download = `config_escala_para_${proxAno}-${proxMes}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            importExportFeedback.textContent = 'Progressão exportada com sucesso!';
+            importExportFeedback.className = 'text-xs text-green-600 text-center';
+        });
+
+        /**
+         * Evento de 'change' para o input de IMPORTAR (Lógica inalterada)
+         */
+        importInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) {
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const content = e.target.result;
+                    const importedData = JSON.parse(content);
+
+                    if (importedData.tipo !== "configuracao_escala_pm" || !importedData.alunosProximoMes || !importedData.postos || !importedData.vagas) {
+                        throw new Error('Arquivo inválido ou não é um arquivo de progressão.');
+                    }
+
+                    alunosTextarea.value = importedData.alunosProximoMes.join('\n');
+                    postosTextarea.value = importedData.postos;
+                    vagasTextarea.value = importedData.vagas;
+                    responsavelInput.value = importedData.responsavel || '';
+                    cargoResponsavelInput.value = importedData.cargo_responsavel || '';
+                    // Não importamos os dias_ignorar, pois são específicos do mês
+
+                    localStorage.setItem('escala_alunos', alunosTextarea.value);
+                    localStorage.setItem('escala_postos', postosTextarea.value);
+                    localStorage.setItem('escala_vagas', vagasTextarea.value);
+                    localStorage.setItem('escala_responsavel', responsavelInput.value);
+                    localStorage.setItem('escala_cargo_responsavel', cargoResponsavelInput.value);
+
+                    importExportFeedback.textContent = 'Progressão importada e salva no navegador!';
+                    importExportFeedback.className = 'text-xs text-green-600 text-center';
+
+                    event.target.value = null; 
+
+                } catch (error) {
+                    importExportFeedback.textContent = `Erro ao importar: ${error.message}`;
+                    importExportFeedback.className = 'text-xs text-red-600 text-center';
+                    event.target.value = null;
+                }
+            };
+            reader.readText(file);
+        });
+
+    </script>
+</body>
+</html>

@@ -4,6 +4,8 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 export default defineConfig({
+  // ADICIONADO: Necessário para o GitHub Pages
+  base: "/AutoScale/",
   plugins: [
     react(),
     runtimeErrorOverlay(),
@@ -28,6 +30,7 @@ export default defineConfig({
   },
   root: path.resolve(import.meta.dirname, "client"),
   build: {
+    // Mantive dist/public conforme seu arquivo original
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
   },

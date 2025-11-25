@@ -1,169 +1,130 @@
-import { z } from "zod";
+// Este arquivo define os tipos de dados e as regras de negócio
 
-// ============================================================================
-// DOMAIN TYPES - Gerador de Escala Mensal
-// ============================================================================
-
-// --- Student & Class Management ---
-export type StudentClass = 'A' | 'B' | 'C' | 'N/A';
-
-export const studentSchema = z.object({
-  number: z.string(),
-  class: z.enum(['A', 'B', 'C', 'N/A']),
-});
-
-export type Student = z.infer<typeof studentSchema>;
-
-// --- Service Posts Configuration ---
-export const servicePostSchema = z.object({
-  name: z.string(),
-  slots: z.number().int().positive(),
-});
-
-export type ServicePost = z.infer<typeof servicePostSchema>;
-
-// Expanded rows for display (e.g., "sentinelas (1/3)")
-export const servicePostRowSchema = z.object({
-  rowName: z.string(),
-  baseName: z.string(), // Original post name
-});
-
-export type ServicePostRow = z.infer<typeof servicePostRowSchema>;
-
-// --- Schedule Cell (one student assignment) ---
-export const scheduleCellSchema = z.object({
-  student: z.string().nullable(),
-  isWeekend: z.boolean().optional(),
-  isIgnoredDay: z.boolean().optional(),
-});
-
-export type ScheduleCell = z.infer<typeof scheduleCellSchema>;
-
-// --- Schedule Day ---
-export const scheduleDaySchema = z.object({
-  day: z.number().int().positive(),
-  dayOfWeek: z.number().int().min(0).max(6),
-  dayOfWeekInitial: z.string(),
-  assignments: z.record(z.string(), scheduleCellSchema), // Key: rowName, Value: ScheduleCell
-});
-
-export type ScheduleDay = z.infer<typeof scheduleDaySchema>;
-
-// --- Generation Configuration ---
-export const generationConfigSchema = z.object({
-  students: z.array(z.string()).min(1, "Lista de alunos não pode estar vazia"),
-  servicePosts: z.array(z.string()).min(1, "Lista de postos não pode estar vazia"),
-  slots: z.array(z.number().int().positive()).min(1, "Lista de vagas não pode estar vazia"),
-  month: z.number().int().min(0).max(11),
-  year: z.number().int().min(2000).max(2100),
-  ignoredDays: z.array(z.number().int().positive()).optional().default([]),
-  responsible: z.string().optional().default(""),
-  responsiblePosition: z.string().optional().default("Chefe do Corpo de Alunos"),
-});
-
-export type GenerationConfig = z.infer<typeof generationConfigSchema>;
-
-// --- Generation Result ---
-export const generationResultSchema = z.object({
-  scheduleData: z.record(z.string(), z.record(z.number(), scheduleCellSchema)),
-  scheduleTitle: z.string(),
-  daysInMonth: z.number(),
-  allDays: z.array(scheduleDaySchema),
-  postRows: z.array(z.string()),
-  ignoredDays: z.set(z.number()),
-  studentQueues: z.object({
-    A: z.array(z.string()),
-    B: z.array(z.string()),
-    C: z.array(z.string()),
-  }),
-  queueIndices: z.object({
-    A: z.number(),
-    B: z.number(),
-    C: z.number(),
-  }),
-});
-
-export type GenerationResult = z.infer<typeof generationResultSchema>;
-
-// --- Analytics Result ---
-export const studentStatsSchema = z.object({
-  student: z.string(),
-  class: z.string(),
-  totalShifts: z.number(),
-  totalDaysOff: z.number(),
-  postBreakdown: z.record(z.string(), z.number()),
-});
-
-export type StudentStats = z.infer<typeof studentStatsSchema>;
-
-export const analyticsResultSchema = z.object({
-  studentStats: z.array(studentStatsSchema),
-  totalStudents: z.number(),
-  totalShiftsAssigned: z.number(),
-  averageShiftsPerStudent: z.number(),
-  postDistribution: z.record(z.string(), z.number()),
-});
-
-export type AnalyticsResult = z.infer<typeof analyticsResultSchema>;
-
-// --- Persistence (Import/Export) ---
-export const exportDataSchema = z.object({
-  tipo: z.literal("configuracao_escala_pm"),
-  dataExportacao: z.string(),
-  alunosProximoMes: z.array(z.string()),
-  postos: z.string(),
-  vagas: z.string(),
-  responsavel: z.string().optional(),
-  cargo_responsavel: z.string().optional(),
-});
-
-export type ExportData = z.infer<typeof exportDataSchema>;
-
-// --- Local Storage Data ---
-export const localStorageDataSchema = z.object({
-  escala_alunos: z.string().optional(),
-  escala_postos: z.string().optional(),
-  escala_vagas: z.string().optional(),
-  escala_responsavel: z.string().optional(),
-  escala_cargo_responsavel: z.string().optional(),
-  escala_dias_ignorar: z.string().optional(),
-});
-
-export type LocalStorageData = z.infer<typeof localStorageDataSchema>;
-
-// ============================================================================
-// HELPERS
-// ============================================================================
-
-export function getStudentClass(studentNumber: string): StudentClass {
-  const num = parseInt(studentNumber, 10);
-  if (isNaN(num)) return 'N/A';
+// --- CONFIGURAÇÃO ---
+export interface GenerationConfig {
+  // ALTERADO (v9): Permite string (texto bruto) OU string[] (já processado)
+  // Isso resolve a ambiguidade entre o contexto de UI e o Motor e corrige o erro do split
+  students: string | string[]; 
+  servicePosts: string[];
+  slots: number[];
+  month: number;
+  year: number;
+  ignoredDays: number[];
+  responsible: string;
+  responsiblePosition: string;
   
-  if (num >= 1 && num <= 25) return 'A';
-  if (num >= 26 && num <= 50) return 'B';
-  if (num >= 51 && num <= 74) return 'C';
-  return 'N/A';
+  isCycleEnabled: boolean; 
+  cyclePostToRemove: string; 
+
+  historicalMonth?: number; 
+  historicalYear?: number;  
+
+  // Modo de Grupos Manuais
+  isGroupMode: boolean; 
+  manualGroups: ManualGroup[]; 
 }
+
+export interface ManualGroup {
+  id: string;
+  name: string;
+  students: string;
+}
+
+export interface HistoricalStats {
+  studentId: string;
+  accumulatedServices: number;
+  accumulatedPostCounts: Record<string, number>;
+}
+
+export interface ScheduleCell {
+  student: string | null;
+  isWeekend: boolean;
+  isIgnoredDay: boolean;
+}
+
+export interface ScheduleDay {
+  day: number;
+  dayOfWeek: number;
+  dayOfWeekInitial: string;
+  assignments: Record<string, number>;
+}
+
+export interface GenerationResult {
+  scheduleData: Record<string, Record<number, ScheduleCell>>;
+  scheduleTitle: string;
+  daysInMonth: number;
+  allDays: ScheduleDay[];
+  postRows: string[];
+  ignoredDays: Set<number>;
+  studentQueues: any; 
+  queueIndices: any;  
+  warnings: string[];
+}
+
+export interface StudentStats {
+  student: string;
+  class: string; 
+  totalShifts: number;
+  totalDaysOff: number;
+  postBreakdown: Record<string, number>;
+  accumulatedServices: number;
+  accumulatedPostCounts: Record<string, number>;
+}
+
+export interface AnalyticsResult {
+  studentStats: StudentStats[];
+  dailyClassDistribution: Record<string, Record<string, number>>;
+  totalStudents: number;
+  totalShiftsAssigned: number;
+  averageShiftsPerStudent: number;
+  postDistribution: Record<string, number>;
+}
+
+export interface ExportData {
+  tipo: "configuracao_escala_pm";
+  dataExportacao: string;
+  escala_postos: string;
+  escala_vagas: string;
+  escala_responsavel: string;
+  escala_cargo_responsavel: string;
+  escala_ciclo_ativo: string;
+  escala_ciclo_posto: string;
+  escala_alunos: string;
+  escala_alunos_count: string;
+  escala_alunos_excluidos: string;
+  escala_turmas_count: string;
+  escala_alunas_pfem: string;
+  escala_alunas_restricoes: string;
+  escala_stats_compensacao?: StudentStats[];
+  escala_mes_historico?: number;
+  escala_ano_historico?: number;
+  
+  escala_modo_grupos?: string; 
+  escala_grupos_manuais?: ManualGroup[];
+}
+
+export type LocalStorageData = {
+  [K in keyof Omit<ExportData, 'tipo' | 'dataExportacao' | 'escala_stats_compensacao' | 'escala_mes_historico' | 'escala_ano_historico' | 'escala_grupos_manuais'>]: string | undefined;
+} & {
+  escala_dias_ignorar?: string;
+  escala_stats_compensacao?: StudentStats[];
+  escala_mes_historico?: number;
+  escala_ano_historico?: number;
+  escala_grupos_manuais?: ManualGroup[]; 
+};
 
 export const MONTH_NAMES = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
 ];
 
-export const DAY_NAMES = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 export const DAY_INITIALS = ["D", "S", "T", "Q", "Q", "S", "S"];
 
-// ============================================================================
-// LEGACY TYPES (for storage.ts compatibility)
-// ============================================================================
-
-export const userSchema = z.object({
-  id: z.string(),
-  username: z.string(),
-  password: z.string(),
-});
-
-export const insertUserSchema = userSchema.omit({ id: true });
-
-export type User = z.infer<typeof userSchema>;
-export type InsertUser = z.infer<typeof insertUserSchema>;
+export function getStudentClass(studentId: string): string {
+  const id = parseInt(studentId.trim(), 10);
+  if (isNaN(id)) return 'N/A';
+  if (id >= 1 && id <= 25) return 'A';
+  if (id >= 26 && id <= 50) return 'B';
+  if (id >= 51 && id <= 74) return 'C';
+  return 'N/A';
+}

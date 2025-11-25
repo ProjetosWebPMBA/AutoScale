@@ -1,37 +1,58 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
+// Não precisamos do ScrollArea, o div com overflow-x-auto abaixo é melhor
 import type { GenerationResult } from '@shared/schema';
 import { FileDown } from 'lucide-react';
 
 interface ScheduleViewProps {
   result: GenerationResult;
   onExportPDF: () => void;
+  highlightedStudents?: string[]; // (NOVO) Lista de IDs para destacar (PFems)
 }
 
-export function ScheduleView({ result, onExportPDF }: ScheduleViewProps) {
+export function ScheduleView({ result, onExportPDF, highlightedStudents = [] }: ScheduleViewProps) {
   const { scheduleData, scheduleTitle, postRows, allDays, ignoredDays } = result;
+
+  // Função auxiliar para checar se deve destacar
+  const shouldHighlight = (studentName: string | null) => {
+    if (!studentName || highlightedStudents.length === 0) return false;
+    // Verifica se o nome do aluno contém algum dos IDs da lista de destaque
+    return highlightedStudents.some(id => studentName.includes(id));
+  };
 
   return (
     <Card className="w-full bg-card p-6">
       <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
         <h2 className="text-xl font-semibold text-foreground">{scheduleTitle}</h2>
-        <Button
-          data-testid="button-export-pdf"
-          onClick={onExportPDF}
-          className="bg-primary hover:bg-primary/90"
-        >
-          <FileDown className="w-4 h-4 mr-2" />
-          Gerar PDF da Escala
-        </Button>
+        <div className="flex items-center gap-4">
+          {/* Legenda Opcional */}
+          {highlightedStudents.length > 0 && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-3 h-3 bg-red-100 border border-red-500 rounded-sm block"></span>
+              <span className="text-red-600 font-semibold">PFem (Destaque)</span>
+            </div>
+          )}
+          <Button
+            data-testid="button-export-pdf"
+            onClick={onExportPDF}
+            className="bg-primary hover:bg-primary/90"
+          >
+            <FileDown className="w-4 h-4 mr-2" />
+            Gerar PDF da Escala
+          </Button>
+        </div>
       </div>
 
-      <ScrollArea className="w-full">
+      {/* Este é o container de rolagem correto */}
+      <div className="overflow-x-auto">
         <div className="min-w-max">
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr>
-                <th className="border border-border bg-muted px-3 py-2 text-left font-semibold text-xs uppercase tracking-wide sticky left-0 z-10">
+                {/* CORREÇÃO DO BUG: Trocado 'bg-muted' por 'bg-background'.
+                  'bg-background' é a cor de fundo sólida da sua aplicação. 
+                */}
+                <th className="border border-border bg-background px-3 py-2 text-left font-semibold text-xs uppercase tracking-wide sticky left-0 z-10">
                   Posto/Dia
                 </th>
                 {allDays.map((dayInfo) => {
@@ -58,21 +79,27 @@ export function ScheduleView({ result, onExportPDF }: ScheduleViewProps) {
             <tbody>
               {postRows.map((rowName, rowIndex) => (
                 <tr key={rowName} data-testid={`row-post-${rowIndex}`}>
-                  <td className="border border-border bg-card px-3 py-2 font-medium text-xs sticky left-0 z-10">
+                  {/* CORREÇÃO DO BUG: Trocado 'bg-muted' por 'bg-background'
+                    Isso garante um fundo opaco que não deixa os números de trás aparecerem.
+                  */}
+                  <td className="border border-border bg-background px-3 py-2 font-medium text-xs sticky left-0 z-10">
                     {rowName}
                   </td>
                   {allDays.map((dayInfo) => {
                     const cell = scheduleData[rowName][dayInfo.day];
                     const isWeekend = cell.isWeekend;
                     const isIgnored = cell.isIgnoredDay;
+                    const isHighlighted = shouldHighlight(cell.student); // (NOVO) Verifica destaque
 
                     return (
                       <td
                         key={dayInfo.day}
                         data-testid={`cell-${rowIndex}-${dayInfo.day}`}
                         className={`border border-border px-3 py-2 text-center text-xs ${
-                          isWeekend ? 'bg-secondary/30' : 'bg-background'
-                        } ${isIgnored ? 'bg-muted/30 text-muted-foreground' : ''}`}
+                          isWeekend ? 'bg-secondary/30' : 'bg-background' // Células normais já usam bg-background
+                        } ${isIgnored ? 'bg-muted/30 text-muted-foreground' : ''} ${
+                          isHighlighted ? 'bg-red-50 text-red-600 font-bold' : '' // (NOVO) Aplica estilo vermelho
+                        }`}
                       >
                         {cell.student || '-'}
                       </td>
@@ -83,7 +110,9 @@ export function ScheduleView({ result, onExportPDF }: ScheduleViewProps) {
             </tbody>
           </table>
         </div>
-      </ScrollArea>
+      </div>
+      {/* Fim do container de rolagem */}
+
 
       {ignoredDays.size > 0 && (
         <p className="text-xs text-muted-foreground mt-4">

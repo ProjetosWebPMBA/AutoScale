@@ -1,28 +1,105 @@
+import { useState } from 'react';
 import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import type { AnalyticsResult } from '@shared/schema';
-import { BarChart3, Users, TrendingUp } from 'lucide-react';
+import { BarChart3, Users, TrendingUp, ArrowUpDown, Layers } from 'lucide-react';
 
 interface AnalyticsPanelProps {
   analytics: AnalyticsResult;
+  highlightedStudents?: string[]; // Recebe a lista de PFems
 }
 
-export function AnalyticsPanel({ analytics }: AnalyticsPanelProps) {
-  const { studentStats, totalStudents, totalShiftsAssigned, averageShiftsPerStudent, postDistribution } = analytics;
+type SortMode = 'numeric' | 'group';
 
-  // Sort students by class and number
+export function AnalyticsPanel({ analytics, highlightedStudents = [] }: AnalyticsPanelProps) {
+  const { studentStats, totalStudents, totalShiftsAssigned, averageShiftsPerStudent, postDistribution } = analytics;
+  const [sortMode, setSortMode] = useState<SortMode>('group'); // Padrão: Por Grupo
+
+  // Função auxiliar para verificar se é PFem
+  const isHighlighted = (studentName: string) => {
+    if (!studentName || highlightedStudents.length === 0) return false;
+    return highlightedStudents.some(id => studentName.includes(id));
+  };
+
+  // Lógica de Ordenação Dinâmica
   const sortedStats = [...studentStats].sort((a, b) => {
-    if (a.class !== b.class) {
-      return a.class.localeCompare(b.class);
+    const numA = parseInt(a.student.replace(/\D/g, ''), 10);
+    const numB = parseInt(b.student.replace(/\D/g, ''), 10);
+    const hasNum = !isNaN(numA) && !isNaN(numB);
+
+    if (sortMode === 'group') {
+      // 1. Ordena por Grupo/Sala
+      if (a.class !== b.class) {
+        return a.class.localeCompare(b.class);
+      }
+      // 2. Desempate numérico dentro do grupo
+      if (hasNum) return numA - numB;
+      return a.student.localeCompare(b.student);
+    } else {
+      // Modo 'numeric': Ignora o grupo, ordena puramente pelo número/nome
+      if (hasNum) return numA - numB;
+      return a.student.localeCompare(b.student);
     }
-    return parseInt(a.student) - parseInt(b.student);
   });
+
+  const getBadgeStyle = (name: string) => {
+    if (name === 'A') return 'bg-blue-100 text-blue-800 border-blue-200';
+    if (name === 'B') return 'bg-green-100 text-green-800 border-green-200';
+    if (name === 'C') return 'bg-purple-100 text-purple-800 border-purple-200';
+    if (name === 'N/A' || name === 'Sem Grupo' || name === '?') return 'bg-gray-100 text-gray-800 border-gray-200';
+
+    const palettes = [
+      'bg-orange-100 text-orange-800 border-orange-200',
+      'bg-cyan-100 text-cyan-800 border-cyan-200',
+      'bg-pink-100 text-pink-800 border-pink-200',
+      'bg-indigo-100 text-indigo-800 border-indigo-200',
+      'bg-teal-100 text-teal-800 border-teal-200',
+      'bg-rose-100 text-rose-800 border-rose-200',
+      'bg-amber-100 text-amber-800 border-amber-200',
+      'bg-lime-100 text-lime-800 border-lime-200',
+      'bg-violet-100 text-violet-800 border-violet-200',
+      'bg-emerald-100 text-emerald-800 border-emerald-200',
+    ];
+
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    
+    const index = Math.abs(hash) % palettes.length;
+    return palettes[index];
+  };
 
   return (
     <Card className="w-full bg-card p-6">
-      <h2 className="text-xl font-semibold mb-6 text-foreground flex items-center gap-2">
-        <BarChart3 className="w-5 h-5" />
-        Análise da Escala
-      </h2>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <BarChart3 className="w-5 h-5" />
+          Análise da Escala
+        </h2>
+        
+        {/* Controles de Ordenação */}
+        <div className="flex items-center bg-muted p-1 rounded-lg border border-border">
+          <Button
+            variant={sortMode === 'numeric' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setSortMode('numeric')}
+            className="text-xs h-7 gap-2"
+          >
+            <ArrowUpDown className="w-3 h-3" />
+            Por Numérica
+          </Button>
+          <Button
+            variant={sortMode === 'group' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setSortMode('group')}
+            className="text-xs h-7 gap-2"
+          >
+            <Layers className="w-3 h-3" />
+            Por Grupo
+          </Button>
+        </div>
+      </div>
 
       {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -74,13 +151,22 @@ export function AnalyticsPanel({ analytics }: AnalyticsPanelProps) {
 
       {/* Student Stats Table */}
       <div>
-        <h3 className="text-lg font-medium mb-4 text-foreground">Estatísticas por Aluno</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-medium text-foreground">Estatísticas por Aluno</h3>
+          {highlightedStudents.length > 0 && (
+            <div className="text-xs flex items-center gap-2 bg-red-50/80 px-2 py-1 rounded border border-red-200 text-red-700">
+              <span className="w-2 h-2 bg-red-400 rounded-full"></span>
+              PFem (Destaque)
+            </div>
+          )}
+        </div>
+        
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="bg-muted">
                 <th className="border border-border px-3 py-2 text-left font-semibold text-xs uppercase tracking-wide">Aluno</th>
-                <th className="border border-border px-3 py-2 text-center font-semibold text-xs uppercase tracking-wide">Sala</th>
+                <th className="border border-border px-3 py-2 text-center font-semibold text-xs uppercase tracking-wide">Sala / Grupo</th>
                 <th className="border border-border px-3 py-2 text-center font-semibold text-xs uppercase tracking-wide">Turnos</th>
                 <th className="border border-border px-3 py-2 text-center font-semibold text-xs uppercase tracking-wide">Folgas</th>
                 {Object.keys(postDistribution).map(post => (
@@ -91,27 +177,33 @@ export function AnalyticsPanel({ analytics }: AnalyticsPanelProps) {
               </tr>
             </thead>
             <tbody>
-              {sortedStats.map((stats) => (
-                <tr key={stats.student} data-testid={`stats-row-${stats.student}`} className="hover:bg-muted/30">
-                  <td className="border border-border px-3 py-2 font-medium">{stats.student}</td>
-                  <td className="border border-border px-3 py-2 text-center">
-                    <span className={`inline-block px-2 py-0.5 rounded-sm text-xs font-medium ${
-                      stats.class === 'A' ? 'bg-blue-100 text-blue-800' :
-                      stats.class === 'B' ? 'bg-green-100 text-green-800' :
-                      'bg-purple-100 text-purple-800'
-                    }`}>
-                      {stats.class}
-                    </span>
-                  </td>
-                  <td className="border border-border px-3 py-2 text-center font-semibold">{stats.totalShifts}</td>
-                  <td className="border border-border px-3 py-2 text-center text-muted-foreground">{stats.totalDaysOff}</td>
-                  {Object.keys(postDistribution).map(post => (
-                    <td key={post} className="border border-border px-3 py-2 text-center text-xs">
-                      {stats.postBreakdown[post] || 0}
+              {sortedStats.map((stats) => {
+                const isPfem = isHighlighted(stats.student);
+                return (
+                  <tr 
+                    key={stats.student} 
+                    data-testid={`stats-row-${stats.student}`} 
+                    className={`hover:bg-muted/50 transition-colors ${isPfem ? 'bg-red-50/60 dark:bg-red-900/20' : ''}`}
+                  >
+                    <td className="border border-border px-3 py-2 font-medium">
+                      {stats.student}
+                      {isPfem && <span className="ml-1.5 text-[10px] text-red-500 font-bold">★</span>}
                     </td>
-                  ))}
-                </tr>
-              ))}
+                    <td className="border border-border px-3 py-2 text-center">
+                      <span className={`inline-block px-2 py-0.5 rounded-sm text-xs font-bold border ${getBadgeStyle(stats.class)}`}>
+                        {stats.class}
+                      </span>
+                    </td>
+                    <td className="border border-border px-3 py-2 text-center font-semibold">{stats.totalShifts}</td>
+                    <td className="border border-border px-3 py-2 text-center text-muted-foreground">{stats.totalDaysOff}</td>
+                    {Object.keys(postDistribution).map(post => (
+                      <td key={post} className="border border-border px-3 py-2 text-center text-xs">
+                        {stats.postBreakdown[post] || 0}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

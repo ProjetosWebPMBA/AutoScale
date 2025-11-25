@@ -6,8 +6,6 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { useSchedule } from '@/contexts/ScheduleContext';
 import { useToast } from '@/hooks/use-toast';
 import { generateSchedule, computeAnalytics } from '@/services/scheduleEngine';
-
-// --- (PDF-FIX) Importa a função (que agora tem a lógica NOVA e 'async') ---
 import { exportToPDF } from '@/services/pdfExporter'; 
 
 import {
@@ -19,9 +17,8 @@ import {
   clearLocalStorage,
 } from '@/services/persistence';
 
-// CORREÇÃO AQUI: Separamos os Tipos dos Valores
 import type { StudentStats } from '@shared/schema'; 
-import { MONTH_NAMES } from '@shared/schema'; // Importado como valor agora
+import { MONTH_NAMES } from '@shared/schema';
 
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button'; 
@@ -34,25 +31,26 @@ export default function Home() {
 
   const [importedStats, setImportedStats] = useState<StudentStats[] | null>(null);
 
+  // --- CORREÇÃO DA LOGO ---
+  // Pega o caminho base (/AutoScale/) e garante que a imagem carregue corretamente
+  const baseUrl = import.meta.env.BASE_URL;
+  const logoSrc = `${baseUrl}logo-pmba.png`.replace(/\/\//g, '/');
+  // ------------------------
+
   const handleGenerate = () => {
     try {
       dispatch({ type: 'START_GENERATION' });
 
-      // --- FIX DE ERRO & SUPORTE A GRUPOS ---
       let students: string[] = [];
       
-      // 1. Se estiver em Modo Grupo, compilamos a lista baseada nos grupos
       if (config.isGroupMode && config.manualGroups && config.manualGroups.length > 0) {
           const allMembers: string[] = [];
           config.manualGroups.forEach(g => {
-             // Aceita separadores: quebra de linha ou ponto e vírgula
              const members = g.students.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean);
              allMembers.push(...members);
           });
-          // Remove duplicados para passar uma lista limpa ao motor
           students = Array.from(new Set(allMembers));
       } 
-      // 2. Se for Modo Padrão, pegamos do campo de texto
       else {
           const rawStudents = config.students; 
           if (Array.isArray(rawStudents)) {
@@ -83,9 +81,8 @@ export default function Home() {
         .map(s => s.trim())
         .filter(Boolean);
 
-      // Monta o objeto de configuração para o motor
       const generationConfig = {
-        students, // Agora passamos o array sanitizado
+        students,
         servicePosts,
         slots,
         month: config.month,
@@ -110,7 +107,7 @@ export default function Home() {
       if (result.warnings && result.warnings.length > 0) {
          result.warnings.forEach(warning => {
              toast({
-                 variant: "default", // ou warning se tivesse
+                 variant: "default",
                  title: "Atenção na Geração",
                  description: warning,
                  duration: 6000
@@ -132,7 +129,6 @@ export default function Home() {
         duration: 5000,
       });
       
-      // Limpa estado temporário APÓS gerar, para não usar o mesmo histórico 2x sem querer
       setImportedStats(null);
       updateConfig({ historicalMonth: undefined, historicalYear: undefined });
       
@@ -164,7 +160,6 @@ export default function Home() {
       return;
     }
     try {
-      // Prepara lista de Pfems para passar ao exportador
       const femaleStudentsList = config.femaleStudents
         .split(';')
         .map(s => s.trim())
@@ -176,7 +171,7 @@ export default function Home() {
         config.responsiblePosition.trim(),
         config.month,
         config.year,
-        femaleStudentsList // Passa a lista aqui
+        femaleStudentsList 
       );
 
       toast({
@@ -203,12 +198,8 @@ export default function Home() {
       return;
     }
     try {
-      // Prepara os dados de stats para o próximo mês
-      // O 'studentStats' do analytics JÁ CONTÉM a soma do histórico + mês atual
-      // Esses campos (accumulatedServices, accumulatedPostCounts) serão a base do próximo mês.
       const statsForExport = state.analytics.studentStats.map(stat => ({
         ...stat,
-        // Garante que os acumulados exportados reflitam o total final deste mês
         accumulatedServices: stat.totalShifts, 
         accumulatedPostCounts: stat.postBreakdown
       }));
@@ -227,11 +218,11 @@ export default function Home() {
         config.year,
         config.isCycleEnabled,
         config.cyclePostToRemove ?? "",
-        config.month, // O mês gerado vira o histórico
-        config.year,  // O ano gerado vira o histórico
+        config.month,
+        config.year,
         config.isGroupMode,
         config.manualGroups,
-        statsForExport // Passamos os stats atualizados
+        statsForExport
       );
 
       const dataToExport = {
@@ -270,7 +261,6 @@ export default function Home() {
         
         const appliedData = applyImportedData(importedData);
         
-        // Robustez na importação de alunos
         let importedStudents = appliedData.escala_alunos || config.students;
         if (Array.isArray(importedStudents)) {
             importedStudents = importedStudents.join('\n');
@@ -333,7 +323,7 @@ export default function Home() {
         
         saveToLocalStorage({
           ...appliedData,
-          escala_stats_compensacao: undefined, // Não salva no LS para não poluir, mantém na memória (state)
+          escala_stats_compensacao: undefined, 
           escala_alunos_count: String(importedCount),
           escala_alunos_excluidos: importedExcluded,
           escala_turmas_count: String(importedClassCount), 
@@ -405,8 +395,9 @@ export default function Home() {
     <div className="min-h-screen relative overflow-hidden"> 
       
       <div className="absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
+        {/* CORREÇÃO AQUI: Usando a variável logoSrc */}
         <img
-          src="/logo-pmba.png" 
+          src={logoSrc}
           alt="Logo PMBA"
           className="w-[400px] h-auto opacity-10"
         />
@@ -441,8 +432,9 @@ export default function Home() {
             )}
           </div>
           <div className="flex items-center gap-4 mt-4 sm:mt-0">
+            {/* CORREÇÃO AQUI: Usando a variável logoSrc */}
             <img 
-              src="/logo-pmba.png" 
+              src={logoSrc}
               alt="Logo PMBA" 
               className="w-64 h-auto"
             />

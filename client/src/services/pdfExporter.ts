@@ -55,7 +55,11 @@ export async function exportToPDF(
   // --- 1. CABEÇALHO ---
   
   try {
-    const logoInfo = await loadImage('/logo-pmba.png');
+    // CORREÇÃO: Pega a URL correta dependendo se está no GitHub ou Local
+    const baseUrl = import.meta.env.BASE_URL;
+    const logoPath = `${baseUrl}logo-pmba.png`.replace(/\/\//g, '/');
+    
+    const logoInfo = await loadImage(logoPath);
     
     // LÓGICA DE PROPORÇÃO (ASPECT RATIO)
     const targetWidth = 32; 
@@ -64,7 +68,7 @@ export async function exportToPDF(
 
     doc.addImage(logoInfo.dataUrl, 'PNG', pageWidth - 40, 5, targetWidth, targetHeight); 
   } catch (e) {
-    console.warn("Logo não carregada", e);
+    console.warn("Logo não carregada no PDF", e);
   }
 
   doc.setDrawColor(0); 
@@ -161,12 +165,12 @@ export async function exportToPDF(
       font: 'helvetica',
       fontSize: 6.5,
       // -- AJUSTES DE ALTURA AQUI --
-      cellPadding: 1.5, // Aumentado de 0.8 para 1.5 para dar respiro interno
-      minCellHeight: 5.5, // Altura mínima forçada em mm para cada linha
+      cellPadding: 1.5,
+      minCellHeight: 5.5,
       // ----------------------------
       halign: 'center',
       valign: 'middle',
-      lineWidth: 0.3, // Mantém bordas grossas para definição
+      lineWidth: 0.3,
       lineColor: [0, 0, 0],
       textColor: [0, 0, 0]
     },
@@ -199,7 +203,7 @@ export async function exportToPDF(
             data.cell.styles.minCellHeight = 1.5;
             data.cell.styles.cellPadding = 0;
             data.cell.styles.fillColor = [255, 255, 255];
-            data.cell.styles.lineWidth = 0; // Sem bordas na spacer
+            data.cell.styles.lineWidth = 0;
             data.cell.text = [];
             return; 
         }
@@ -249,10 +253,8 @@ export async function exportToPDF(
       }
     },
     didDrawCell: (data) => {
-        // Desenho manual de bordas grossas nos blocos
         if (data.section === 'body') {
             const rawRow = data.row.raw as string[];
-            
             if (rawRow[0] === '__SPACER__') return;
 
             const nextRow = data.table.body[data.row.index + 1];
@@ -264,14 +266,12 @@ export async function exportToPDF(
             const isLastRow = !nextRow;
 
             const borderThickness = 0.4; 
-            
             data.doc.setDrawColor(0);
             data.doc.setLineWidth(borderThickness);
 
             if (isLastRow || isNextSpacer) {
                 data.doc.line(data.cell.x, data.cell.y + data.cell.height, data.cell.x + data.cell.width, data.cell.y + data.cell.height);
             }
-
             if (isFirstRow || isPrevSpacer) {
                 data.doc.line(data.cell.x, data.cell.y, data.cell.x + data.cell.width, data.cell.y);
             }

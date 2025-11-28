@@ -7,6 +7,7 @@ import type { ExportData, LocalStorageData, StudentStats, ManualGroup } from "@s
 const STORAGE_KEYS = {
   STUDENTS: 'escala_alunos',
   POSTS: 'escala_postos',
+  LEGENDS: 'escala_legendas', // NOVO
   SLOTS: 'escala_vagas',
   RESPONSIBLE: 'escala_responsavel',
   RESPONSIBLE_POSITION: 'escala_cargo_responsavel',
@@ -20,7 +21,6 @@ const STORAGE_KEYS = {
   HISTORICAL_YEAR: 'escala_ano_historico',
   FEMALE_STUDENTS: 'escala_alunas_pfem',
   FEMALE_RESTRICTIONS: 'escala_alunas_restricoes',
-  // NOVO: Grupos Manuais
   IS_GROUP_MODE: 'escala_modo_grupos',
   MANUAL_GROUPS: 'escala_grupos_manuais',
 } as const;
@@ -29,6 +29,7 @@ export function loadFromLocalStorage(): LocalStorageData {
   const data: LocalStorageData = {
     escala_alunos: localStorage.getItem(STORAGE_KEYS.STUDENTS) || undefined,
     escala_postos: localStorage.getItem(STORAGE_KEYS.POSTS) || undefined,
+    escala_legendas: localStorage.getItem(STORAGE_KEYS.LEGENDS) || undefined, // NOVO
     escala_vagas: localStorage.getItem(STORAGE_KEYS.SLOTS) || undefined,
     escala_responsavel: localStorage.getItem(STORAGE_KEYS.RESPONSIBLE) || undefined,
     escala_cargo_responsavel: localStorage.getItem(STORAGE_KEYS.RESPONSIBLE_POSITION) || undefined,
@@ -108,26 +109,25 @@ export function createExportData(
   historicalYear?: number,
   isGroupMode?: boolean,
   manualGroups?: ManualGroup[],
-  // NOVO: Recebe stats completos para garantir persistência do rodízio
-  compensationStats?: StudentStats[] 
+  compensationStats?: StudentStats[],
+  legendsText?: string // NOVO
 ): Partial<ExportData> { 
   
   const exportData: Partial<ExportData> = {
     tipo: "configuracao_escala_pm",
     dataExportacao: new Date().toISOString(),
     escala_postos: postsText,
+    escala_legendas: legendsText || "", // NOVO
     escala_vagas: slotsText,
     escala_responsavel: responsible,
     escala_cargo_responsavel: responsiblePosition,
     escala_ciclo_ativo: String(isCycleEnabled),
     escala_ciclo_posto: cyclePostToRemove,
-    // O histórico exportado é o mês ATUAL que acabou de ser gerado, 
-    // para servir de base para o PRÓXIMO mês.
     escala_mes_historico: currentMonth,
     escala_ano_historico: currentYear,
     escala_modo_grupos: String(isGroupMode),
     escala_grupos_manuais: manualGroups,
-    escala_stats_compensacao: compensationStats, // Dados vitais para o equilíbrio
+    escala_stats_compensacao: compensationStats,
   };
 
   return exportData;
@@ -159,6 +159,7 @@ export function applyImportedData(data: ExportData): LocalStorageData {
   return {
     escala_alunos: data.escala_alunos || undefined,
     escala_postos: data.escala_postos || undefined,
+    escala_legendas: data.escala_legendas || undefined, // NOVO
     escala_vagas: data.escala_vagas || undefined,
     escala_responsavel: data.escala_responsavel || undefined,
     escala_cargo_responsavel: data.escala_cargo_responsavel || undefined,
@@ -167,7 +168,6 @@ export function applyImportedData(data: ExportData): LocalStorageData {
     escala_alunos_count: data.escala_alunos_count || undefined,
     escala_alunos_excluidos: data.escala_alunos_excluidos || undefined,
     escala_turmas_count: data.escala_turmas_count || undefined,
-    // Importa o stats completo contendo accumulatedServices e accumulatedPostCounts
     escala_stats_compensacao: data.escala_stats_compensacao || undefined, 
     escala_alunas_pfem: data.escala_alunas_pfem || undefined,
     escala_alunas_restricoes: data.escala_alunas_restricoes || undefined,

@@ -5,6 +5,7 @@ import { loadFromLocalStorage } from '@/services/persistence';
 const initialStudentCount = 74;
 const initialStudents = Array.from({ length: initialStudentCount }, (_, i) => i + 1).join('\n');
 const initialPosts = "Aluno de dia\nCmd da guarda\nsentinelas\nplantões masc\nplantões sala de meios\nserviço de rancho";
+const initialLegends = "AD\nCG\nSt\nPl M\nPl SM\nRn"; // Legendas padrão
 const initialSlots = "1\n1\n3\n3\n3\n5";
 
 // Estendemos a config localmente
@@ -16,9 +17,9 @@ type LocalGenerationConfig = GenerationConfig & {
   femaleRestrictedPosts: string[]; 
   historicalMonth?: number;
   historicalYear?: number;
-  // NOVO: Manual Groups
   isGroupMode: boolean;
   manualGroups: ManualGroup[];
+  // postLegends já está em GenerationConfig (schema), mas aqui garantimos o uso
 };
 
 const getDefaultConfig = (): LocalGenerationConfig => {
@@ -29,6 +30,7 @@ const getDefaultConfig = (): LocalGenerationConfig => {
     excludedStudents: "",
     classCount: 3,
     servicePosts: initialPosts,
+    postLegends: initialLegends.split('\n'), // Inicializa
     slots: initialSlots,
     month: now.getMonth(),
     year: now.getFullYear(),
@@ -41,7 +43,6 @@ const getDefaultConfig = (): LocalGenerationConfig => {
     femaleRestrictedPosts: [],
     historicalMonth: undefined,
     historicalYear: undefined,
-    // Padrão
     isGroupMode: false,
     manualGroups: [],
   };
@@ -78,9 +79,13 @@ export const ConfigProvider = ({ children }: { children: ReactNode }) => {
     const loadedHistoricalMonth = loaded.escala_mes_historico;
     const loadedHistoricalYear = loaded.escala_ano_historico;
 
-    // NOVO: Carregamento de grupos
     const loadedIsGroupMode = loaded.escala_modo_grupos === 'true';
     const loadedManualGroups = loaded.escala_grupos_manuais || [];
+
+    // Carrega Legendas
+    const loadedLegends = loaded.escala_legendas 
+      ? loaded.escala_legendas.split('\n')
+      : defaults.postLegends;
 
     return {
       students: loadedStudentString,
@@ -88,6 +93,7 @@ export const ConfigProvider = ({ children }: { children: ReactNode }) => {
       excludedStudents: loadedExcludedStudents,
       classCount: loadedClassCount,
       servicePosts: loaded.escala_postos || defaults.servicePosts,
+      postLegends: loadedLegends,
       slots: loaded.escala_vagas || defaults.slots,
       month: defaults.month,
       year: defaults.year,
@@ -103,7 +109,6 @@ export const ConfigProvider = ({ children }: { children: ReactNode }) => {
       femaleRestrictedPosts: loadedFemaleRestrictedPosts,
       historicalMonth: loadedHistoricalMonth,
       historicalYear: loadedHistoricalYear,
-      // NOVO
       isGroupMode: loadedIsGroupMode,
       manualGroups: loadedManualGroups,
     };
@@ -124,15 +129,12 @@ export const ConfigProvider = ({ children }: { children: ReactNode }) => {
     }
   };
   
-  // CORREÇÃO: Lógica de detecção de grupo agora usa Match Exato
   const getStudentClassDynamic = (studentId: string): string => {
     const cleanId = studentId.trim();
     
     if (config.isGroupMode && config.manualGroups.length > 0) {
       for (const grp of config.manualGroups) {
-        // Quebra por separadores e limpa espaços
         const members = grp.students.split(/[\n;,]+/).map(s => s.trim());
-        // Busca exata (evita que "1" case com "10", "12", etc.)
         if (members.includes(cleanId)) {
           return grp.name;
         }
@@ -140,7 +142,6 @@ export const ConfigProvider = ({ children }: { children: ReactNode }) => {
       return 'Sem Grupo';
     }
 
-    // Lógica antiga de classes (A, B, C...)
     const studentNum = parseInt(cleanId, 10);
     if (isNaN(studentNum) || studentNum <= 0) return '?';
 

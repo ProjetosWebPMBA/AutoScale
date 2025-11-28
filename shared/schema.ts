@@ -3,9 +3,9 @@
 // --- CONFIGURAÇÃO ---
 export interface GenerationConfig {
   // ALTERADO (v9): Permite string (texto bruto) OU string[] (já processado)
-  // Isso resolve a ambiguidade entre o contexto de UI e o Motor e corrige o erro do split
   students: string | string[]; 
   servicePosts: string[];
+  postLegends: string[]; // NOVO: Legendas/Siglas dos postos
   slots: number[];
   month: number;
   year: number;
@@ -84,6 +84,7 @@ export interface ExportData {
   tipo: "configuracao_escala_pm";
   dataExportacao: string;
   escala_postos: string;
+  escala_legendas: string; // NOVO
   escala_vagas: string;
   escala_responsavel: string;
   escala_cargo_responsavel: string;

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'; 
+import React, { useMemo, useState, useEffect } from 'react'; 
 import {
   Card,
   CardContent,
@@ -20,8 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useConfig } from '@/contexts/ConfigContext';
-import { saveToLocalStorage }
-  from '@/services/persistence';
+import { saveToLocalStorage, createExportData, downloadJSON } from '@/services/persistence';
 import { useToast } from '@/hooks/use-toast';
 import { MONTH_NAMES, ManualGroup } from '@shared/schema';
 import {
@@ -33,7 +32,9 @@ import {
   CalendarCheck as LuCalendarCheck,
   Users as LuUsers,
   Plus as LuPlus,
-  UserCheck as LuUserCheck
+  UserCheck as LuUserCheck,
+  ArrowUp as LuArrowUp,
+  ArrowDown as LuArrowDown
 } from 'lucide-react';
 
 interface ConfigurationPanelProps {
@@ -42,6 +43,13 @@ interface ConfigurationPanelProps {
   onImport: (file: File) => void;
   onClear: () => void;
   isGenerating: boolean;
+}
+
+interface PostItem {
+  id: string; // Para key do React
+  post: string;
+  slots: number;
+  legend: string;
 }
 
 export function ConfigurationPanel({
@@ -54,6 +62,42 @@ export function ConfigurationPanel({
   const { config, updateConfig } = useConfig();
   const { toast } = useToast();
   const [newPost, setNewPost] = useState(""); 
+  
+  // Estado local para evitar perder foco ao digitar
+  const [localPostItems, setLocalPostItems] = useState<PostItem[]>([]);
+
+  // Sincroniza estado local quando a config global muda (ex: importação)
+  useEffect(() => {
+    const posts = config.servicePosts.split('\n').filter(Boolean).map(s => s.trim());
+    const slots = config.slots.split('\n').filter(Boolean).map(s => parseInt(s.trim(), 10));
+    const legends = config.postLegends || [];
+
+    const mapped = posts.map((post, index) => ({
+      id: `post-${index}`, // Usando index como base estável inicial
+      post: post,
+      slots: slots[index] || 1,
+      legend: legends[index] || ""
+    }));
+    
+    // Só atualiza se houver diferença real de tamanho para não resetar edições em andamento
+    if (mapped.length !== localPostItems.length || mapped.some((m, i) => m.post !== localPostItems[i]?.post)) {
+       setLocalPostItems(mapped);
+    }
+  }, [config.servicePosts, config.slots, config.postLegends]);
+
+
+  const updateConfigFromItems = (items: PostItem[]) => {
+    const newPosts = items.map(i => i.post).join('\n');
+    const newSlots = items.map(i => i.slots).join('\n');
+    const newLegends = items.map(i => i.legend).join('\n'); // Salva legendas como string separada por quebra de linha
+    
+    setLocalPostItems(items); // Atualiza local para UI instantânea
+    updateConfig({ 
+        servicePosts: newPosts, 
+        slots: newSlots,
+        postLegends: items.map(i => i.legend) // Salva no array de legendas
+    });
+  };
 
   const handleSave = () => {
     try {
@@ -63,6 +107,7 @@ export function ConfigurationPanel({
         escala_alunos_excluidos: config.excludedStudents, 
         escala_turmas_count: String(config.classCount),
         escala_postos: config.servicePosts,
+        escala_legendas: config.postLegends.join('\n'), // Salva legendas
         escala_vagas: config.slots,
         escala_responsavel: config.responsible,
         escala_cargo_responsavel: config.responsiblePosition,
@@ -107,55 +152,48 @@ export function ConfigurationPanel({
   };
 
   // --- Lógica para Postos e Vagas ---
-  const postItems = useMemo(() => {
-    const posts = config.servicePosts.split('\n').filter(Boolean).map(s => s.trim());
-    const slots = config.slots.split('\n').filter(Boolean).map(s => parseInt(s.trim(), 10));
-    return posts.map((post, index) => ({
-      id: `${post}-${index}-${Math.random()}`, 
-      post: post,
-      slots: slots[index] || 1,
-    }));
-  }, [config.servicePosts, config.slots]);
-
-  const updateConfigFromItems = (items: { post: string, slots: number }[]) => {
-    const newPosts = items.map(i => i.post).join('\n');
-    const newSlots = items.map(i => i.slots).join('\n');
-    updateConfig({ servicePosts: newPosts, slots: newSlots });
-  };
 
   const handleAddNewPost = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && newPost.trim() !== "") {
       e.preventDefault();
-      const newItems = [...postItems, { id: crypto.randomUUID(), post: newPost.trim(), slots: 1 }];
+      const newItems = [...localPostItems, { id: crypto.randomUUID(), post: newPost.trim(), slots: 1, legend: "" }];
       updateConfigFromItems(newItems);
       setNewPost(""); 
     }
   };
 
-  const handleSlotChange = (id: string, newSlots: number) => {
-    const newItems = postItems.map(item =>
-      item.id === id ? { ...item, slots: Math.max(0, newSlots) } : item 
-    );
+  const handleEditItem = (index: number, field: keyof PostItem, value: string | number) => {
+    const newItems = [...localPostItems];
+    newItems[index] = { ...newItems[index], [field]: value };
     updateConfigFromItems(newItems);
   };
 
-  const handleRemovePost = (id: string) => {
-    const confirmation = prompt(`Tem certeza que deseja remover o posto "${postItems.find(i => i.id === id)?.post}"? Digite 'sim' para confirmar.`);
-    if (confirmation === 'sim') {
-      const newItems = postItems.filter(item => item.id !== id);
-      updateConfigFromItems(newItems);
-      const postName = postItems.find(i => i.id === id)?.post.toUpperCase();
-      if (postName) {
-        const newRestrictions = config.femaleRestrictedPosts.filter(p => p !== postName);
-        updateConfig({ femaleRestrictedPosts: newRestrictions });
-      }
-    }
+  const handleMovePost = (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === localPostItems.length - 1) return;
+
+    const newItems = [...localPostItems];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    
+    // Swap
+    [newItems[index], newItems[targetIndex]] = [newItems[targetIndex], newItems[index]];
+    
+    updateConfigFromItems(newItems);
   };
 
-  const servicePostsList = useMemo(() =>
-    postItems.map(item => item.post.trim().toUpperCase()),
-    [postItems]
-  );
+  const handleRemovePost = (index: number) => {
+    const item = localPostItems[index];
+    const confirmation = prompt(`Tem certeza que deseja remover o posto "${item.post}"? Digite 'sim' para confirmar.`);
+    if (confirmation === 'sim') {
+      const newItems = localPostItems.filter((_, i) => i !== index);
+      updateConfigFromItems(newItems);
+      
+      // Remove restrição se existir
+      const postName = item.post.toUpperCase();
+      const newRestrictions = config.femaleRestrictedPosts.filter(p => p !== postName);
+      updateConfig({ femaleRestrictedPosts: newRestrictions });
+    }
+  };
 
   const togglePostRestriction = (postName: string) => {
     const upperName = postName.toUpperCase();
@@ -167,6 +205,12 @@ export function ConfigurationPanel({
       newRestrictions = [...currentRestrictions, upperName];
     }
     updateConfig({ femaleRestrictedPosts: newRestrictions });
+  };
+  
+  // Custom Export para incluir as legendas
+  const handleCustomExport = () => {
+    // Reutiliza a função de exportação, mas agora ela suporta legendas (atualizamos persistence.ts)
+    onExport();
   };
 
   // --- Lógica de Grupos Manuais ---
@@ -318,20 +362,20 @@ export function ConfigurationPanel({
               <Label className="text-pink-100 text-xs mt-2 mb-1">Restringir PFem nos postos:</Label>
               <ScrollArea className="h-[120px] w-full rounded-md border border-pink-500/30 p-2 bg-black/20">
                 <div className="flex flex-col gap-2">
-                  {postItems.length === 0 && <p className="text-xs text-white/50">Adicione postos primeiro.</p>}
-                  {postItems.map((item) => {
+                  {localPostItems.length === 0 && <p className="text-xs text-white/50">Adicione postos primeiro.</p>}
+                  {localPostItems.map((item, index) => {
                     const upperName = item.post.toUpperCase();
                     const isRestricted = config.femaleRestrictedPosts.includes(upperName);
                     return (
-                      <div key={item.id} className="flex items-center gap-2">
+                      <div key={index} className="flex items-center gap-2">
                         <Checkbox 
-                            id={`rest-${item.id}`} 
+                            id={`rest-${index}`} 
                             checked={isRestricted}
                             onCheckedChange={() => togglePostRestriction(upperName)}
                             className="data-[state=checked]:bg-pink-500 border-pink-400"
                         />
                         <label 
-                            htmlFor={`rest-${item.id}`} 
+                            htmlFor={`rest-${index}`} 
                             className="text-xs text-white cursor-pointer select-none"
                           >
                             {item.post}
@@ -358,29 +402,76 @@ export function ConfigurationPanel({
               />
             </div>
             
-            <Label className="text-white">Gerenciar Vagas</Label>
-            <ScrollArea className="h-[300px] md:h-[500px] w-full rounded-md border p-4 bg-black/10">
-              <div className="flex flex-col gap-3">
-                {postItems.length === 0 && (
-                  <p className="text-xs text-white/70 text-center">Nenhum posto adicionado.</p>
+            <div className="flex justify-between items-center">
+                <Label className="text-white">Gerenciar Postos & Vagas</Label>
+                <span className="text-[10px] text-white/50 uppercase">Ordem | Nome | Sigla | Vagas</span>
+            </div>
+            
+            <ScrollArea className="h-[300px] md:h-[500px] w-full rounded-md border p-2 bg-black/10">
+              <div className="flex flex-col gap-2">
+                {localPostItems.length === 0 && (
+                  <p className="text-xs text-white/70 text-center mt-10">Nenhum posto adicionado.</p>
                 )}
-                {postItems.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between gap-2 p-2 rounded-md hover:bg-black/20">
-                    <span className="text-white text-sm flex-1 truncate" title={item.post}>{item.post}</span>
+                {localPostItems.map((item, index) => (
+                  <div key={index} className="flex items-center gap-1 p-1 rounded hover:bg-black/20 group">
+                    
+                    {/* Controles de Ordem */}
+                    <div className="flex flex-col">
+                        <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-4 w-4 text-white/50 hover:text-white"
+                            onClick={() => handleMovePost(index, 'up')}
+                            disabled={index === 0}
+                        >
+                            <LuArrowUp className="w-3 h-3" />
+                        </Button>
+                        <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-4 w-4 text-white/50 hover:text-white"
+                            onClick={() => handleMovePost(index, 'down')}
+                            disabled={index === localPostItems.length - 1}
+                        >
+                            <LuArrowDown className="w-3 h-3" />
+                        </Button>
+                    </div>
+
+                    {/* Nome do Posto (Editável) */}
+                    <Input 
+                        value={item.post}
+                        onChange={(e) => handleEditItem(index, 'post', e.target.value)}
+                        className="flex-1 h-8 text-xs bg-transparent border-transparent hover:border-white/20 focus:border-white/50 text-white px-1"
+                        placeholder="Nome"
+                    />
+
+                    {/* Sigla/Legenda (Nova funcionalidade) */}
+                    <Input 
+                        value={item.legend}
+                        onChange={(e) => handleEditItem(index, 'legend', e.target.value)}
+                        className="w-12 h-8 text-xs bg-white/5 border-transparent hover:border-white/20 focus:border-white/50 text-yellow-200 px-1 text-center"
+                        placeholder="Sigla"
+                        maxLength={5}
+                        title="Sigla para PDF (Legenda)"
+                    />
+
+                    {/* Vagas */}
                     <Input
                       type="number"
                       value={item.slots}
-                      onChange={(e) => handleSlotChange(item.id, parseInt(e.target.value, 10))}
-                      className="w-16 h-8 text-center"
+                      onChange={(e) => handleEditItem(index, 'slots', parseInt(e.target.value, 10))}
+                      className="w-10 h-8 text-center text-xs px-0 bg-transparent border-white/10 text-white"
                       min="0"
                     />
+
+                    {/* Excluir */}
                     <Button
                       variant="destructive"
                       size="icon"
-                      className="h-8 w-8"
-                      onClick={() => handleRemovePost(item.id)}
+                      className="h-7 w-7 opacity-50 group-hover:opacity-100 transition-opacity"
+                      onClick={() => handleRemovePost(index)}
                     >
-                      <LuTrash2 className="h-4 w-4" />
+                      <LuTrash2 className="h-3 w-3" />
                     </Button>
                   </div>
                 ))}
@@ -444,9 +535,9 @@ export function ConfigurationPanel({
                       <SelectValue placeholder="Selecione..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {servicePostsList.map(post => (
-                        <SelectItem key={post} value={post.toUpperCase()}>
-                          {post}
+                      {localPostItems.map(item => (
+                        <SelectItem key={item.post} value={item.post.toUpperCase()}>
+                          {item.post}
                         </SelectItem>
                       ))}
                     </SelectContent>

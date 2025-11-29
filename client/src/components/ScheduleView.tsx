@@ -1,6 +1,5 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-// Não precisamos do ScrollArea, o div com overflow-x-auto abaixo é melhor
 import type { GenerationResult } from '@shared/schema';
 import { FileDown } from 'lucide-react';
 
@@ -13,11 +12,31 @@ interface ScheduleViewProps {
 export function ScheduleView({ result, onExportPDF, highlightedStudents = [] }: ScheduleViewProps) {
   const { scheduleData, scheduleTitle, postRows, allDays, ignoredDays } = result;
 
-  // Função auxiliar para checar se deve destacar
-  const shouldHighlight = (studentName: string | null) => {
-    if (!studentName || highlightedStudents.length === 0) return false;
-    // Verifica se o nome do aluno contém algum dos IDs da lista de destaque
-    return highlightedStudents.some(id => studentName.includes(id));
+  // Função auxiliar para checar se deve destacar (LÓGICA CORRIGIDA)
+  const shouldHighlight = (studentValue: string | null) => {
+    if (!studentValue || highlightedStudents.length === 0) return false;
+    
+    // Normaliza o valor da célula (aluno na escala)
+    const studentStr = studentValue.trim();
+    const studentNum = parseInt(studentStr, 10);
+    const isStudentNumeric = !isNaN(studentNum);
+
+    return highlightedStudents.some(highlightId => {
+       const hStr = highlightId.trim();
+       if (!hStr) return false;
+
+       const hNum = parseInt(hStr, 10);
+       const isHNumeric = !isNaN(hNum);
+
+       // Se ambos forem numéricos (ex: "02" e "2"), compara pelo valor numérico
+       // Isso resolve "02" não achando "2" e impede "2" de achar "12"
+       if (isStudentNumeric && isHNumeric) {
+           return studentNum === hNum;
+       }
+       
+       // Se não forem números (ex: nomes), compara strings exatas
+       return studentStr === hStr;
+    });
   };
 
   return (
@@ -43,15 +62,11 @@ export function ScheduleView({ result, onExportPDF, highlightedStudents = [] }: 
         </div>
       </div>
 
-      {/* Este é o container de rolagem correto */}
       <div className="overflow-x-auto">
         <div className="min-w-max">
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr>
-                {/* CORREÇÃO DO BUG: Trocado 'bg-muted' por 'bg-background'.
-                  'bg-background' é a cor de fundo sólida da sua aplicação. 
-                */}
                 <th className="border border-border bg-background px-3 py-2 text-left font-semibold text-xs uppercase tracking-wide sticky left-0 z-10">
                   Posto/Dia
                 </th>
@@ -79,9 +94,6 @@ export function ScheduleView({ result, onExportPDF, highlightedStudents = [] }: 
             <tbody>
               {postRows.map((rowName, rowIndex) => (
                 <tr key={rowName} data-testid={`row-post-${rowIndex}`}>
-                  {/* CORREÇÃO DO BUG: Trocado 'bg-muted' por 'bg-background'
-                    Isso garante um fundo opaco que não deixa os números de trás aparecerem.
-                  */}
                   <td className="border border-border bg-background px-3 py-2 font-medium text-xs sticky left-0 z-10">
                     {rowName}
                   </td>
@@ -89,16 +101,16 @@ export function ScheduleView({ result, onExportPDF, highlightedStudents = [] }: 
                     const cell = scheduleData[rowName][dayInfo.day];
                     const isWeekend = cell.isWeekend;
                     const isIgnored = cell.isIgnoredDay;
-                    const isHighlighted = shouldHighlight(cell.student); // (NOVO) Verifica destaque
+                    const isHighlighted = shouldHighlight(cell.student); // Lógica nova aplicada aqui
 
                     return (
                       <td
                         key={dayInfo.day}
                         data-testid={`cell-${rowIndex}-${dayInfo.day}`}
                         className={`border border-border px-3 py-2 text-center text-xs ${
-                          isWeekend ? 'bg-secondary/30' : 'bg-background' // Células normais já usam bg-background
+                          isWeekend ? 'bg-secondary/30' : 'bg-background' 
                         } ${isIgnored ? 'bg-muted/30 text-muted-foreground' : ''} ${
-                          isHighlighted ? 'bg-red-50 text-red-600 font-bold' : '' // (NOVO) Aplica estilo vermelho
+                          isHighlighted ? 'bg-red-50 text-red-600 font-bold border-red-200' : '' 
                         }`}
                       >
                         {cell.student || '-'}
@@ -111,8 +123,6 @@ export function ScheduleView({ result, onExportPDF, highlightedStudents = [] }: 
           </table>
         </div>
       </div>
-      {/* Fim do container de rolagem */}
-
 
       {ignoredDays.size > 0 && (
         <p className="text-xs text-muted-foreground mt-4">

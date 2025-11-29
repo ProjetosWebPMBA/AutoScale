@@ -13,12 +13,27 @@ type SortMode = 'numeric' | 'group';
 
 export function AnalyticsPanel({ analytics, highlightedStudents = [] }: AnalyticsPanelProps) {
   const { studentStats, totalStudents, totalShiftsAssigned, averageShiftsPerStudent, postDistribution } = analytics;
-  const [sortMode, setSortMode] = useState<SortMode>('group'); // Padrão: Por Grupo
+  const [sortMode, setSortMode] = useState<SortMode>('group'); 
 
-  // Função auxiliar para verificar se é PFem
+  // Função auxiliar para verificar se é PFem (CORRIGIDA)
   const isHighlighted = (studentName: string) => {
     if (!studentName || highlightedStudents.length === 0) return false;
-    return highlightedStudents.some(id => studentName.includes(id));
+    
+    const sStr = studentName.trim();
+    const sNum = parseInt(sStr, 10);
+    const isSNumeric = !isNaN(sNum);
+
+    return highlightedStudents.some(id => {
+       const hStr = id.trim();
+       if (!hStr) return false;
+       const hNum = parseInt(hStr, 10);
+       const isHNumeric = !isNaN(hNum);
+
+       if (isSNumeric && isHNumeric) {
+           return sNum === hNum;
+       }
+       return sStr === hStr; // Comparação exata de string
+    });
   };
 
   // Lógica de Ordenação Dinâmica
@@ -28,15 +43,12 @@ export function AnalyticsPanel({ analytics, highlightedStudents = [] }: Analytic
     const hasNum = !isNaN(numA) && !isNaN(numB);
 
     if (sortMode === 'group') {
-      // 1. Ordena por Grupo/Sala
       if (a.class !== b.class) {
         return a.class.localeCompare(b.class);
       }
-      // 2. Desempate numérico dentro do grupo
       if (hasNum) return numA - numB;
       return a.student.localeCompare(b.student);
     } else {
-      // Modo 'numeric': Ignora o grupo, ordena puramente pelo número/nome
       if (hasNum) return numA - numB;
       return a.student.localeCompare(b.student);
     }
@@ -78,7 +90,6 @@ export function AnalyticsPanel({ analytics, highlightedStudents = [] }: Analytic
           Análise da Escala
         </h2>
         
-        {/* Controles de Ordenação */}
         <div className="flex items-center bg-muted p-1 rounded-lg border border-border">
           <Button
             variant={sortMode === 'numeric' ? 'secondary' : 'ghost'}

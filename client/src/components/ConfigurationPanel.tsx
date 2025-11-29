@@ -2,7 +2,6 @@ import React, { useMemo, useState, useEffect } from 'react';
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
@@ -21,13 +20,12 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; 
 import { useConfig } from '@/contexts/ConfigContext';
-import { saveToLocalStorage, createExportData, downloadJSON } from '@/services/persistence';
+import { saveToLocalStorage } from '@/services/persistence';
 import { useToast } from '@/hooks/use-toast';
 import { MONTH_NAMES, ManualGroup, StudentData } from '@shared/schema';
 import {
   Save as LuSave,
   Upload as LuUpload,
-  Download as LuDownload,
   Trash2 as LuTrash2,
   Loader2 as LuLoader2,
   CalendarCheck as LuCalendarCheck,
@@ -45,8 +43,8 @@ import {
 interface ConfigurationPanelProps {
   onGenerate: () => void;
   onExport: () => void;
-  onImportHistory: (file: File) => void; // Importar só histórico/config
-  onImportFull: (file: File) => void;    // Importar escala completa
+  onImportHistory: (file: File) => void;
+  onImportFull: (file: File) => void;
   onClear: () => void;
   isGenerating: boolean;
 }
@@ -73,8 +71,12 @@ export function ConfigurationPanel({
   const [localPostItems, setLocalPostItems] = useState<PostItem[]>([]);
   const [studentImportText, setStudentImportText] = useState("");
 
-  // Mantém estado local sincronizado
+  // ESTADO NOVO: Controla o texto dos dias ignorados localmente
+  const [localIgnoredDays, setLocalIgnoredDays] = useState("");
+
+  // Mantém estado local sincronizado com a config global (ex: ao importar arquivo)
   useEffect(() => {
+    // Sincroniza Postos
     const posts = config.servicePosts.split('\n').filter(Boolean); 
     const slots = config.slots.split('\n').filter(Boolean).map(s => parseInt(s.trim(), 10));
     const legends = config.postLegends || [];
@@ -89,7 +91,14 @@ export function ConfigurationPanel({
     if (mapped.length !== localPostItems.length || mapped.some((m, i) => m.post !== localPostItems[i]?.post)) {
        setLocalPostItems(mapped);
     }
-  }, [config.servicePosts, config.slots, config.postLegends]);
+
+    // Sincroniza Dias Ignorados (CORREÇÃO DO BUG DA VÍRGULA)
+    // Só atualizamos o texto local se a config mudar externamente (ex: importação)
+    // Para evitar loops, comparamos se a representação numérica é diferente
+    const currentConfigStr = config.ignoredDays.join(', ');
+    setLocalIgnoredDays(currentConfigStr);
+
+  }, [config.servicePosts, config.slots, config.postLegends, config.ignoredDays]);
 
   const updateConfigFromItems = (items: PostItem[]) => {
     const newPosts = items.map(i => i.post).join('\n');
@@ -105,6 +114,9 @@ export function ConfigurationPanel({
 
   const handleSave = () => {
     try {
+      // Garante que os dias ignorados atuais no input sejam salvos, caso o usuário não tenha clicado fora
+      handleIgnoredDaysBlur();
+
       const dataToSave = {
         escala_alunos: config.students,
         escala_alunos_count: String(config.studentCount),
@@ -144,22 +156,43 @@ export function ConfigurationPanel({
     updateConfig({ [e.target.id]: e.target.value });
   };
   
+  // Lógica corrigida para Dias Ignorados
+  const handleIgnoredDaysChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Permite digitar qualquer coisa (vírgula, espaço) sem validar imediatamente
+    setLocalIgnoredDays(e.target.value);
+  };
+
+  const handleIgnoredDaysBlur = () => {
+    // Só processa e envia para a config global quando sair do campo
+    const parsed = localIgnoredDays
+      .split(',')
+      .map(d => parseInt(d.trim(), 10))
+      .filter(n => !isNaN(n) && n > 0);
+      
+    // Remove duplicatas e ordena para ficar bonito
+    const uniqueSorted = Array.from(new Set(parsed)).sort((a, b) => a - b);
+    
+    updateConfig({ ignoredDays: uniqueSorted });
+    
+    // Opcional: Reformatar o texto visualmente para ficar padrão "1, 2, 3"
+    // setLocalIgnoredDays(uniqueSorted.join(', ')); // (O useEffect já fará isso quando a config atualizar)
+  };
+  
   const handleSelectNumberChange = (id: string, value: string) => {
      updateConfig({ [id]: parseInt(value, 10) });
   };
 
-  // Funções separadas para os botões de importação
   const handleFileHistory = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       onImportHistory(e.target.files[0]);
-      e.target.value = ''; // Reset para permitir re-seleção
+      e.target.value = ''; 
     }
   };
 
   const handleFileFull = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       onImportFull(e.target.files[0]);
-      e.target.value = ''; // Reset
+      e.target.value = ''; 
     }
   };
 
@@ -433,9 +466,8 @@ export function ConfigurationPanel({
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* ... (Coluna 1 e 2 mantidas iguais, omitindo por brevidade se não houve mudança, mas aqui vai o código completo) ... */}
-          {/* Mantendo a estrutura completa para garantir integridade */}
           
+          {/* COLUNA 1 - ALUNOS */}
           <div className="flex flex-col gap-4">
             <Tabs defaultValue="list" className="w-full">
                 <TabsList className="grid w-full grid-cols-2 bg-black/20">
@@ -629,6 +661,7 @@ export function ConfigurationPanel({
             </div>
           </div>
 
+          {/* COLUNA 2 - POSTOS */}
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label htmlFor="newPost" className="text-white">Adicionar Posto (Enter)</Label>
@@ -668,6 +701,7 @@ export function ConfigurationPanel({
             </ScrollArea>
           </div>
 
+          {/* COLUNA 3 - GERAIS */}
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-2">
               <Label htmlFor="responsible" className="text-white">Responsável (Use /Guerra/)</Label>
@@ -677,10 +711,20 @@ export function ConfigurationPanel({
               <Label htmlFor="responsiblePosition" className="text-white">Cargo</Label>
               <Input id="responsiblePosition" value={config.responsiblePosition} onChange={handleTextChange} />
             </div>
+            
+            {/* INPUT DE DIAS IGNORADOS CORRIGIDO */}
             <div className="flex flex-col gap-2">
-              <Label htmlFor="ignoredDays" className="text-white">Dias Ignorados</Label>
-              <Input id="ignoredDays" value={config.ignoredDays.join(', ')} onChange={(e) => updateConfig({ ignoredDays: e.target.value.split(',').map(d => parseInt(d.trim(), 10)).filter(n => !isNaN(n) && n > 0) })} placeholder="ex: 1, 15, 21" />
+              <Label htmlFor="ignoredDays" className="text-white">Dias Ignorados (Enter ou Tab para salvar)</Label>
+              <Input 
+                id="ignoredDays" 
+                value={localIgnoredDays} 
+                onChange={handleIgnoredDaysChange}
+                onBlur={handleIgnoredDaysBlur}
+                onKeyDown={(e) => { if(e.key === 'Enter') handleIgnoredDaysBlur() }}
+                placeholder="ex: 1, 15, 21" 
+              />
             </div>
+
             <div className="p-4 border rounded-md bg-black/10 backdrop-blur-sm flex flex-col gap-4">
               <div className="flex items-center space-x-2">
                 <Checkbox id="isCycleEnabled" checked={config.isCycleEnabled} onCheckedChange={(checked) => updateConfig({ isCycleEnabled: checked as boolean })} />

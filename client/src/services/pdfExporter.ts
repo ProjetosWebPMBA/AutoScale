@@ -69,14 +69,36 @@ export async function exportToPDF(
       const baseNameUpper = baseName.toUpperCase();
       
       const index = servicePosts.findIndex(p => p.trim().toUpperCase() === baseNameUpper);
-      const baseLegend = (index >= 0 && postLegends[index]) ? postLegends[index] : baseName.substring(0, 2).toUpperCase();
+      // Pega a legenda configurada ou gera as iniciais
+      const rawLegend = (index >= 0 && postLegends[index]) ? postLegends[index] : baseName.substring(0, 2).toUpperCase();
       
+      // 1. LÓGICA DE LISTA CUSTOMIZADA (Ex: "PS1, PS2, PSE")
+      if (rawLegend.includes(',') || rawLegend.includes(';')) {
+          const customLegends = rawLegend.split(/[;,]+/).map(s => s.trim());
+          
+          // Extrai o número da vaga do nome da linha (Ex: "Guarda 3" -> 3)
+          // Se não tiver número (vaga única), assume 1
+          const numMatch = rowName.match(/(\d+)$/);
+          const slotNum = numMatch ? parseInt(numMatch[1], 10) : 1;
+          const arrayIndex = slotNum - 1; // Array base 0
+
+          // Se houver legenda definida para essa posição específica, usa ela
+          if (arrayIndex < customLegends.length) {
+              return customLegends[arrayIndex];
+          }
+          // Fallback seguro: usa a primeira legenda + numero
+          return `${customLegends[0]}${slotNum}`;
+      }
+
+      // 2. LÓGICA PADRÃO (Automática: Sigla + Número se > 1 vaga)
       if (slotsCountMap[baseNameUpper] > 1) {
           const numMatch = rowName.match(/(\d+)$/);
           const num = numMatch ? numMatch[1] : '1';
-          return `${baseLegend}${num}`;
+          return `${rawLegend}${num}`;
       }
-      return baseLegend;
+      
+      // 3. VAGA ÚNICA (Retorna a sigla pura, ex: "AD")
+      return rawLegend;
   };
 
   result.postRows.forEach(rowName => {
@@ -102,8 +124,6 @@ export async function exportToPDF(
   // --- 2. CABEÇALHO OFICIAL ---
   
   // Caixa VISTO (Maximizada)
-  // Largura aumentada para 40mm (era 30mm)
-  // Altura aumentada para 22mm (era 18mm)
   const vistoWidth = 40;
   const vistoHeight = 22;
   const vistoY = 8;
@@ -112,26 +132,25 @@ export async function exportToPDF(
   doc.setDrawColor(0);
   doc.rect(marginLeft, vistoY, vistoWidth, vistoHeight); 
   
-  // Textos do Visto (Centralizados na nova largura)
+  // Textos do Visto
   const vistoCenterX = marginLeft + (vistoWidth / 2);
   
   doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
-  doc.text("VISTO", vistoCenterX, vistoY + 4, { align: 'center' }); // y=12
+  doc.text("VISTO", vistoCenterX, vistoY + 4, { align: 'center' });
   
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6.5);
-  doc.text("Em _____/_____/_____.", vistoCenterX, vistoY + 9, { align: 'center' }); // y=17
+  doc.text("Em _____/_____/_____.", vistoCenterX, vistoY + 9, { align: 'center' });
   
-  const lineY = vistoY + 15; // y=23
-  doc.line(marginLeft, lineY, marginLeft + vistoWidth, lineY); // Linha interna mais baixa
+  const lineY = vistoY + 15;
+  doc.line(marginLeft, lineY, marginLeft + vistoWidth, lineY);
   
   doc.setFontSize(6);
-  doc.text("Cmt da OPM", vistoCenterX, lineY + 4, { align: 'center' }); // y=27
+  doc.text("Cmt da OPM", vistoCenterX, lineY + 4, { align: 'center' });
 
   // --- LOGOS ---
   const baseUrl = import.meta.env.BASE_URL;
-  // Altura reduzida para não brigar com o texto (22mm)
   const logoHeight = 22; 
   const logoY = 6; 
   
@@ -143,14 +162,11 @@ export async function exportToPDF(
     const ratio = logoInfo.width / logoInfo.height;
     const targetWidth = logoHeight * ratio; 
 
-    // Posição X: Logo após a caixa de Visto + pequeno gap (2mm)
-    // 10 (margin) + 40 (box) + 2 (gap) = 52
     const logoX = marginLeft + vistoWidth + 2; 
-
     doc.addImage(logoInfo.dataUrl, 'PNG', logoX, logoY, targetWidth, logoHeight); 
   } catch (e) { console.warn("Logo PMBA fail"); }
 
-  // LOGO 2: 9º BEIC (Direita - Simétrica)
+  // LOGO 2: 9º BEIC (Direita)
   try {
     const logo2Path = `${baseUrl}logo-9beic.png`.replace(/\/\//g, '/');
     const logo2Info = await loadImage(logo2Path);
@@ -158,10 +174,7 @@ export async function exportToPDF(
     const ratio2 = logo2Info.width / logo2Info.height;
     const targetWidth2 = logoHeight * ratio2; 
 
-    // Posição X: Simétrica à esquerda (logoX = 52)
-    // Margem direita equivalente: pageWidth - 52 - width
     const logo2X = pageWidth - (marginLeft + vistoWidth + 2) - targetWidth2;
-
     doc.addImage(logo2Info.dataUrl, 'PNG', logo2X, logoY, targetWidth2, logoHeight); 
   } catch (e) { console.warn("Logo 9BEIC fail"); }
 
@@ -180,21 +193,20 @@ export async function exportToPDF(
 
   // Título (PRETO e SUBLINHADO)
   doc.setFontSize(12);
-  doc.setTextColor(0, 0, 0); // Preto
+  doc.setTextColor(0, 0, 0); 
   const title = `ESCALA DE SERVIÇO CFSD ${year} - ${MONTH_NAMES[month].toUpperCase()}/${year}`;
   doc.text(title, centerX, 33, { align: 'center' });
   
-  // Desenha o sublinhado
   const titleWidth = doc.getTextWidth(title);
   doc.setLineWidth(0.5);
   doc.line(centerX - (titleWidth / 2), 34, centerX + (titleWidth / 2), 34);
-  doc.setLineWidth(0.1); // Reset linha
+  doc.setLineWidth(0.1); 
 
   // --- 3. CONSTRUÇÃO DAS LINHAS ---
   const columns = [
     { header: 'Nº', dataKey: 'num' },
     { header: 'GH', dataKey: 'gh' },
-    { header: 'NOME DE GUERRA', dataKey: 'nome' },
+    { header: 'NOME COMPLETO', dataKey: 'nome' }, // Alterado cabeçalho
     { header: 'MAT', dataKey: 'mat' },
   ];
 
@@ -213,8 +225,9 @@ export async function exportToPDF(
       const row: any = {
           num: reg ? reg.id : studentId,
           gh: reg ? reg.gh : '',
-          // AQUI: Usamos APENAS o Nome de Guerra em Maiúsculo
-          nome: reg && reg.warName && reg.warName !== '?' ? reg.warName.toUpperCase() : "ERRO: S/ GUERRA",
+          // AQUI: Usamos o Nome COMPLETO, mas salvamos o WarName separado
+          nome: reg && reg.name ? reg.name.toUpperCase() : "ERRO: S/ NOME",
+          warName: reg && reg.warName && reg.warName !== '?' ? reg.warName.toUpperCase() : "",
           mat: reg ? reg.matricula : '',
       };
 
@@ -254,8 +267,7 @@ export async function exportToPDF(
 
   // --- 4. GERAÇÃO DA TABELA ---
   autoTable(doc, {
-    startY: 38, // Ajustado para 38 para dar espaço ao título sublinhado
-    // Usar a mesma margem esquerda do cabeçalho
+    startY: 38, 
     margin: { left: marginLeft },
     columns: columns,
     body: body,
@@ -281,7 +293,8 @@ export async function exportToPDF(
     columnStyles: {
       0: { cellWidth: 8, fontStyle: 'bold' }, 
       1: { cellWidth: 14 }, 
-      2: { cellWidth: 35, halign: 'left', fontStyle: 'bold' }, 
+      // Aumentei a largura da coluna de nome para 50mm para caber o nome completo
+      2: { cellWidth: 50, halign: 'left' }, 
       3: { cellWidth: 16 }, 
     },
     didParseCell: (data) => {
@@ -308,6 +321,69 @@ export async function exportToPDF(
                 cell.styles.fillColor = [grayLevel, grayLevel, grayLevel];
             }
         }
+        
+        // TRUQUE: Tornar o texto padrão da coluna 'nome' invisível para desenharmos manualmente depois
+        if (data.section === 'body' && column.dataKey === 'nome' && !(row.raw as any).isGroupHeader) {
+            cell.styles.textColor = [255, 255, 255];
+        }
+    },
+    didDrawCell: (data) => {
+        // Desenho manual da célula de NOME para suportar Negrito parcial
+        if (data.section === 'body' && data.column.dataKey === 'nome' && !(data.row.raw as any).isGroupHeader) {
+            const cell = data.cell;
+            const warName = (data.row.raw as any).warName;
+            const textLines = cell.text; // O AutoTable já quebrou o texto em linhas se necessário
+
+            const fontSize = cell.styles.fontSize;
+            doc.setFontSize(fontSize);
+            
+            // Cálculo aproximado para centralizar verticalmente bloco de texto
+            const lineHeight = fontSize * 0.3527 * 1.15; // conversão pt->mm + entrelinha
+            const totalTextHeight = textLines.length * lineHeight;
+            let currentY = cell.y + (cell.height / 2) - (totalTextHeight / 2) + (lineHeight * 0.75);
+
+            const cursorX = cell.x + cell.padding('left');
+
+            textLines.forEach(line => {
+                const cleanLine = String(line);
+                
+                if (warName && cleanLine.includes(warName)) {
+                    // Divide a linha: [Antes] [Guerra] [Depois]
+                    const parts = cleanLine.split(warName);
+                    const pre = parts[0];
+                    const post = parts.slice(1).join(warName); // Junta resto caso o nome apareça 2x (raro)
+
+                    let tempX = cursorX;
+                    
+                    // Desenha parte ANTES (Normal)
+                    if (pre) {
+                        doc.setFont('helvetica', 'normal');
+                        doc.setTextColor(0, 0, 0);
+                        doc.text(pre, tempX, currentY);
+                        tempX += doc.getTextWidth(pre);
+                    }
+
+                    // Desenha GUERRA (Negrito)
+                    doc.setFont('helvetica', 'bold');
+                    doc.setTextColor(0, 0, 0);
+                    doc.text(warName, tempX, currentY);
+                    tempX += doc.getTextWidth(warName);
+
+                    // Desenha parte DEPOIS (Normal)
+                    if (post) {
+                        doc.setFont('helvetica', 'normal');
+                        doc.setTextColor(0, 0, 0);
+                        doc.text(post, tempX, currentY);
+                    }
+                } else {
+                    // Se o nome de guerra não estiver nessa linha (quebra de linha), desenha normal
+                    doc.setFont('helvetica', 'normal');
+                    doc.setTextColor(0, 0, 0);
+                    doc.text(cleanLine, cursorX, currentY);
+                }
+                currentY += lineHeight;
+            });
+        }
     }
   });
 
@@ -322,7 +398,7 @@ export async function exportToPDF(
 
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.text("LEGENDA:", marginLeft, currentY); // Alinhado à margem
+  doc.text("LEGENDA:", marginLeft, currentY); 
   currentY += 4;
 
   doc.setFont('helvetica', 'normal');
@@ -332,18 +408,28 @@ export async function exportToPDF(
   const legendYStart = currentY;
   const maxLegendHeight = pageHeight - 40;
 
-  servicePosts.forEach((post, index) => {
-      const sigla = postLegends[index] || post.substring(0, 2).toUpperCase();
+  // Lógica alterada: Iterar sobre as Linhas geradas (result.postRows)
+  // Isso garante que "Serviço de Rancho 1", "Serviço de Rancho 2" apareçam separados
+  result.postRows.forEach((rowName) => {
+      const sigla = getLegend(rowName);
       
       if (currentY > maxLegendHeight) {
           currentY = legendYStart;
           legendX += 70; 
+          // Se estourar a largura da página, cria nova
+          if (legendX > pageWidth - 50) {
+             doc.addPage();
+             currentY = 20;
+             legendX = marginLeft;
+          }
       }
 
       doc.setFont('helvetica', 'bold');
       doc.text(sigla, legendX, currentY);
+      
       doc.setFont('helvetica', 'normal');
-      doc.text(`- ${post}`, legendX + 10, currentY);
+      // Usando "=" conforme solicitado no exemplo: "PA1 = Plantão..."
+      doc.text(`= ${rowName}`, legendX + 12, currentY);
       
       currentY += 3.5;
   });
@@ -358,22 +444,18 @@ export async function exportToPDF(
   doc.setLineWidth(0.2);
   doc.line(centerX - 50, signY, centerX + 50, signY);
   
-  // Lógica complexa para desenhar Nome Completo com parte em Negrito centralizado
-  // Agora usando BARRAS /.../
-  const fullRespName = responsible.replace(/\//g, '').toUpperCase(); // Remove barras para o nome completo visual
-  const respWarMatch = responsible.match(/\/(.*?)\//); // Regex para barras
+  const fullRespName = responsible.replace(/\//g, '').toUpperCase(); 
+  const respWarMatch = responsible.match(/\/(.*?)\//); 
   const warNameOnly = respWarMatch ? respWarMatch[1].toUpperCase().trim() : null;
 
   doc.setFontSize(10);
   const signTextY = signY + 5;
 
   if (warNameOnly && fullRespName.includes(warNameOnly)) {
-      // Divide o nome: [Antes] [Guerra] [Depois]
       const parts = fullRespName.split(warNameOnly);
       const preText = parts[0] || "";
       const postText = parts.slice(1).join(warNameOnly) || ""; 
 
-      // Calcula larguras para centralizar
       doc.setFont('helvetica', 'normal');
       const preWidth = doc.getTextWidth(preText);
       const postWidth = doc.getTextWidth(postText);
@@ -384,19 +466,16 @@ export async function exportToPDF(
       const totalWidth = preWidth + warWidth + postWidth;
       let cursorX = centerX - (totalWidth / 2);
 
-      // Desenha Parte 1 (Normal)
       if (preText) {
         doc.setFont('helvetica', 'normal');
         doc.text(preText, cursorX, signTextY);
         cursorX += preWidth;
       }
 
-      // Desenha Nome de Guerra (Negrito)
       doc.setFont('helvetica', 'bold');
       doc.text(warNameOnly, cursorX, signTextY);
       cursorX += warWidth;
 
-      // Desenha Parte 2 (Normal)
       if (postText) {
         doc.setFont('helvetica', 'normal');
         doc.text(postText, cursorX, signTextY);
@@ -406,7 +485,6 @@ export async function exportToPDF(
       doc.text(fullRespName, centerX, signTextY, { align: 'center' });
   }
   
-  // Cargo em Itálico
   doc.setFont('times', 'italic'); 
   doc.setFontSize(10);
   doc.text(responsiblePosition, centerX, signY + 10, { align: 'center' });

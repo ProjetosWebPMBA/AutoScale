@@ -1,4 +1,4 @@
-import type { ExportData, LocalStorageData, StudentStats, ManualGroup } from "@shared/schema";
+import type { ExportData, LocalStorageData, StudentStats, ManualGroup, StudentData, GenerationResult, AnalyticsResult } from "@shared/schema";
 
 // ============================================================================
 // LOCAL STORAGE OPERATIONS
@@ -6,8 +6,9 @@ import type { ExportData, LocalStorageData, StudentStats, ManualGroup } from "@s
 
 const STORAGE_KEYS = {
   STUDENTS: 'escala_alunos',
+  STUDENT_REGISTRY: 'escala_dados_alunos', 
   POSTS: 'escala_postos',
-  LEGENDS: 'escala_legendas', // NOVO
+  LEGENDS: 'escala_legendas',
   SLOTS: 'escala_vagas',
   RESPONSIBLE: 'escala_responsavel',
   RESPONSIBLE_POSITION: 'escala_cargo_responsavel',
@@ -29,7 +30,7 @@ export function loadFromLocalStorage(): LocalStorageData {
   const data: LocalStorageData = {
     escala_alunos: localStorage.getItem(STORAGE_KEYS.STUDENTS) || undefined,
     escala_postos: localStorage.getItem(STORAGE_KEYS.POSTS) || undefined,
-    escala_legendas: localStorage.getItem(STORAGE_KEYS.LEGENDS) || undefined, // NOVO
+    escala_legendas: localStorage.getItem(STORAGE_KEYS.LEGENDS) || undefined,
     escala_vagas: localStorage.getItem(STORAGE_KEYS.SLOTS) || undefined,
     escala_responsavel: localStorage.getItem(STORAGE_KEYS.RESPONSIBLE) || undefined,
     escala_cargo_responsavel: localStorage.getItem(STORAGE_KEYS.RESPONSIBLE_POSITION) || undefined,
@@ -59,6 +60,15 @@ export function loadFromLocalStorage(): LocalStorageData {
       console.error("Erro ao ler grupos manuais do cache", e);
     }
   }
+
+  const registryJson = localStorage.getItem(STORAGE_KEYS.STUDENT_REGISTRY);
+  if (registryJson) {
+    try {
+      data.escala_dados_alunos = JSON.parse(registryJson);
+    } catch (e) {
+      console.error("Erro ao ler dados detalhados dos alunos", e);
+    }
+  }
   
   return data;
 }
@@ -69,6 +79,7 @@ export function saveToLocalStorage(data: Partial<LocalStorageData>): void {
   for (const key in dataToSave) {
     const k = key as keyof typeof dataToSave;
     if (dataToSave[k] !== undefined) {
+      // Ignora campos de snapshot ou stats no localStorage puro (apenas config)
       if (k === 'escala_stats_compensacao') continue;
       
       const value = dataToSave[k];
@@ -76,6 +87,8 @@ export function saveToLocalStorage(data: Partial<LocalStorageData>): void {
 
       if (key === 'escala_grupos_manuais') {
          localStorage.setItem(STORAGE_KEYS.MANUAL_GROUPS, JSON.stringify(value));
+      } else if (key === 'escala_dados_alunos') {
+         localStorage.setItem(STORAGE_KEYS.STUDENT_REGISTRY, JSON.stringify(value));
       } else if (typeof value === 'number') {
         localStorage.setItem(storageKey as string, String(value));
       } else if (typeof value === 'string') {
@@ -110,14 +123,27 @@ export function createExportData(
   isGroupMode?: boolean,
   manualGroups?: ManualGroup[],
   compensationStats?: StudentStats[],
-  legendsText?: string // NOVO
+  legendsText?: string,
+  studentRegistry?: StudentData[],
+  // Novos campos para backup total
+  snapshotResult?: GenerationResult,
+  snapshotAnalytics?: AnalyticsResult
 ): Partial<ExportData> { 
   
+  // Serializa o resultado (Set -> Array)
+  let serializedResult: any = undefined;
+  if (snapshotResult) {
+      serializedResult = {
+          ...snapshotResult,
+          ignoredDays: Array.from(snapshotResult.ignoredDays) // Set para Array
+      };
+  }
+
   const exportData: Partial<ExportData> = {
     tipo: "configuracao_escala_pm",
     dataExportacao: new Date().toISOString(),
     escala_postos: postsText,
-    escala_legendas: legendsText || "", // NOVO
+    escala_legendas: legendsText || "",
     escala_vagas: slotsText,
     escala_responsavel: responsible,
     escala_cargo_responsavel: responsiblePosition,
@@ -128,6 +154,9 @@ export function createExportData(
     escala_modo_grupos: String(isGroupMode),
     escala_grupos_manuais: manualGroups,
     escala_stats_compensacao: compensationStats,
+    escala_dados_alunos: studentRegistry,
+    snapshot_resultado: serializedResult, // Salva o grid gerado
+    snapshot_analise: snapshotAnalytics
   };
 
   return exportData;
@@ -159,7 +188,7 @@ export function applyImportedData(data: ExportData): LocalStorageData {
   return {
     escala_alunos: data.escala_alunos || undefined,
     escala_postos: data.escala_postos || undefined,
-    escala_legendas: data.escala_legendas || undefined, // NOVO
+    escala_legendas: data.escala_legendas || undefined,
     escala_vagas: data.escala_vagas || undefined,
     escala_responsavel: data.escala_responsavel || undefined,
     escala_cargo_responsavel: data.escala_cargo_responsavel || undefined,
@@ -175,5 +204,6 @@ export function applyImportedData(data: ExportData): LocalStorageData {
     escala_ano_historico: data.escala_ano_historico,
     escala_modo_grupos: data.escala_modo_grupos,
     escala_grupos_manuais: data.escala_grupos_manuais,
+    escala_dados_alunos: data.escala_dados_alunos
   };
 }

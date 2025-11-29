@@ -31,11 +31,8 @@ export default function Home() {
 
   const [importedStats, setImportedStats] = useState<StudentStats[] | null>(null);
 
-  // --- CORREÇÃO DA LOGO ---
-  // Pega o caminho base (/AutoScale/) e garante que a imagem carregue corretamente
   const baseUrl = import.meta.env.BASE_URL;
   const logoSrc = `${baseUrl}logo-pmba.png`.replace(/\/\//g, '/');
-  // ------------------------
 
   const handleGenerate = () => {
     try {
@@ -49,7 +46,8 @@ export default function Home() {
              const members = g.students.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean);
              allMembers.push(...members);
           });
-          students = Array.from(new Set(allMembers));
+          const uniqueMembers = Array.from(new Set(allMembers));
+          students = uniqueMembers;
       } 
       else {
           const rawStudents = config.students; 
@@ -84,6 +82,7 @@ export default function Home() {
       const generationConfig = {
         students,
         servicePosts,
+        postLegends: config.postLegends || [],
         slots,
         month: config.month,
         year: config.year,
@@ -99,7 +98,8 @@ export default function Home() {
         historicalMonth: config.historicalMonth, 
         historicalYear: config.historicalYear,
         isGroupMode: config.isGroupMode,
-        manualGroups: config.manualGroups
+        manualGroups: config.manualGroups,
+        studentRegistry: config.studentRegistry
       };
 
       const result = generateSchedule(generationConfig, getStudentClass, importedStats); 
@@ -152,18 +152,65 @@ export default function Home() {
 
   const handleExportPDF = async () => {
     if (!state.result) {
-      toast({
-        variant: "destructive",
-        title: "Nenhuma escala gerada",
-        description: "Gere uma escala primeiro para exportar o PDF.",
-      });
+      toast({ variant: "destructive", title: "Nenhuma escala gerada" });
       return;
     }
+
+    const respWarMatch = config.responsible.match(/\/(.*?)\//);
+    if (!respWarMatch || !respWarMatch[1].trim()) {
+        toast({
+            variant: "destructive",
+            title: "Erro no Responsável",
+            description: "Defina o Nome de Guerra entre barras duplas. Ex: 'Cap PM Fulano /Guerra/ Silva'.",
+            duration: 6000
+        });
+        return;
+    }
+
+    const missingWarNames: string[] = [];
+    const registry = config.studentRegistry || [];
+    
+    const activeStudentIds = new Set<string>();
+    
+    if (config.isGroupMode && config.manualGroups) {
+        config.manualGroups.forEach(g => {
+            g.students.split(/[\n;,]+/).forEach(s => {
+                if (s.trim()) activeStudentIds.add(s.trim());
+            });
+        });
+    } else {
+        for(let i=1; i<=config.studentCount; i++) activeStudentIds.add(String(i));
+    }
+
+    activeStudentIds.forEach(id => {
+        const normalizedId = String(parseInt(id, 10)); 
+        const reg = registry.find(r => r.id === id || r.id === normalizedId);
+        
+        if (!reg || !reg.warName || reg.warName.trim() === '' || reg.warName === '?') {
+            missingWarNames.push(id);
+        }
+    });
+
+    if (missingWarNames.length > 0) {
+        const displayList = missingWarNames.slice(0, 5).join(', ');
+        const more = missingWarNames.length > 5 ? `...e mais ${missingWarNames.length - 5}` : '';
+        
+        toast({
+            variant: "destructive",
+            title: "Nomes de Guerra Pendentes!",
+            description: `O PDF não pode ser gerado. Defina o nome entre barras (/Guerra/) para: ${displayList}${more}.`,
+            duration: 7000
+        });
+        return;
+    }
+
     try {
       const femaleStudentsList = config.femaleStudents
         .split(';')
         .map(s => s.trim())
         .filter(Boolean);
+
+      const servicePostsList = config.servicePosts.split('\n').filter(Boolean);
 
       await exportToPDF(
         state.result,
@@ -171,12 +218,17 @@ export default function Home() {
         config.responsiblePosition.trim(),
         config.month,
         config.year,
-        femaleStudentsList 
+        femaleStudentsList,
+        config.studentRegistry || [],
+        config.manualGroups || [],
+        config.isGroupMode,
+        servicePostsList,
+        config.postLegends || []
       );
 
       toast({
-        title: "PDF gerado!",
-        description: "O arquivo foi baixado com sucesso.",
+        title: "PDF Oficial Gerado!",
+        description: "Documento pronto com layout oficial e nomes validados.",
         duration: 3000,
       });
     } catch (error) {
@@ -185,16 +237,13 @@ export default function Home() {
         title: "Erro ao gerar PDF",
         description: error instanceof Error ? error.message : 'Erro desconhecido',
       });
+      console.error(error);
     }
   };
 
   const handleExportJSON = () => {
     if (!state.result || !state.analytics) {
-      toast({
-        variant: "destructive",
-        title: "Nenhuma escala/análise gerada",
-        description: "Gere uma escala primeiro para exportar a compensação.",
-      });
+      toast({ variant: "destructive", title: "Nenhuma escala/análise gerada" });
       return;
     }
     try {
@@ -222,7 +271,11 @@ export default function Home() {
         config.year,
         config.isGroupMode,
         config.manualGroups,
-        statsForExport
+        statsForExport,
+        config.postLegends.join('\n'), 
+        config.studentRegistry,
+        state.result, // Passa o resultado da escala atual para salvar
+        state.analytics // Passa a análise atual
       );
 
       const dataToExport = {
@@ -235,12 +288,12 @@ export default function Home() {
         escala_alunas_restricoes: config.femaleRestrictedPosts.join(';'),
       };
 
-      const filename = `compensacao_${config.year}_${String(config.month + 1).padStart(2, '0')}.json`;
+      const filename = `backup_escala_${config.year}_${String(config.month + 1).padStart(2, '0')}.json`;
       
       downloadJSON(dataToExport, filename);
       toast({
-        title: "Compensação exportada!",
-        description: "O arquivo JSON (com contagens de postos atualizadas) foi salvo.",
+        title: "Backup Completo Salvo!",
+        description: "Contém a escala gerada, estatísticas e configurações.",
         duration: 3000,
       });
     } catch (error) {
@@ -252,13 +305,13 @@ export default function Home() {
     }
   };
 
-  const handleImportJSON = (file: File) => {
+  // Helper comum para importar
+  const processImport = (file: File, isFullRestore: boolean) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const content = e.target?.result as string;
         const importedData = parseImportedJSON(content);
-        
         const appliedData = applyImportedData(importedData);
         
         let importedStudents = appliedData.escala_alunos || config.students;
@@ -286,12 +339,17 @@ export default function Home() {
         const importedIsGroupMode = appliedData.escala_modo_grupos === 'true';
         const importedManualGroups = appliedData.escala_grupos_manuais || [];
         
+        const importedLegends = appliedData.escala_legendas ? appliedData.escala_legendas.split('\n') : config.postLegends;
+        const importedRegistry = appliedData.escala_dados_alunos || [];
+
+        // Atualiza configurações globais
         updateConfig({
           students: importedStudents,
           studentCount: importedCount, 
           excludedStudents: importedExcluded, 
           classCount: importedClassCount, 
           servicePosts: appliedData.escala_postos || config.servicePosts,
+          postLegends: importedLegends,
           slots: appliedData.escala_vagas || config.slots,
           responsible: appliedData.escala_responsavel || config.responsible,
           responsiblePosition: appliedData.escala_cargo_responsavel || config.responsiblePosition,
@@ -303,24 +361,46 @@ export default function Home() {
           historicalYear: importedHistYear,
           isGroupMode: importedIsGroupMode,
           manualGroups: importedManualGroups,
+          studentRegistry: importedRegistry,
         });
         
-        if (appliedData.escala_stats_compensacao) {
-          setImportedStats(appliedData.escala_stats_compensacao as StudentStats[]);
-          toast({
-            title: "Compensação importada!",
-            description: "As contagens de postos do mês anterior foram carregadas.",
-            duration: 4000,
-          });
+        // Logica Diferenciada: RESTAURAÇÃO TOTAL vs HISTÓRICO
+        if (isFullRestore && importedData.snapshot_resultado) {
+            // Restaura o resultado visual e a análise para permitir re-exportar PDF
+            // Recupera o Set de ignoredDays que foi serializado como Array
+            const restoredResult = {
+                ...importedData.snapshot_resultado,
+                ignoredDays: new Set(importedData.snapshot_resultado.ignoredDays)
+            };
+
+            dispatch({
+                type: 'GENERATION_SUCCESS',
+                payload: { 
+                    result: restoredResult, 
+                    analytics: importedData.snapshot_analise || { studentStats: [], dailyClassDistribution: {}, totalStudents: 0, totalShiftsAssigned: 0, averageShiftsPerStudent: 0, postDistribution: {} } 
+                },
+            });
+            
+            toast({ 
+                title: "Escala Restaurada!", 
+                description: "Visualização carregada com sucesso. Você pode gerar o PDF.",
+                duration: 4000
+            });
+            setImportedStats(null); // Não precisamos de histórico se estamos vendo o passado
         } else {
-          setImportedStats(null);
-          toast({
-            title: "Configuração importada!",
-            description: "Arquivo importado (sem dados de compensação).",
-            duration: 3000,
-          });
+            // Importação Padrão (Histórico para o próximo mês)
+            if (appliedData.escala_stats_compensacao) {
+              setImportedStats(appliedData.escala_stats_compensacao as StudentStats[]);
+              toast({ title: "Histórico Importado!", description: "Dados prontos para gerar o PRÓXIMO mês." });
+            } else {
+              setImportedStats(null);
+              toast({ title: "Configuração Importada!", description: "Apenas configurações carregadas." });
+            }
+            // Limpa resultado anterior para evitar confusão
+            dispatch({ type: 'CLEAR_SCHEDULE' });
         }
         
+        // Salva estado
         saveToLocalStorage({
           ...appliedData,
           escala_stats_compensacao: undefined, 
@@ -333,6 +413,8 @@ export default function Home() {
           escala_ano_historico: importedHistYear,
           escala_modo_grupos: String(importedIsGroupMode),
           escala_grupos_manuais: importedManualGroups,
+          escala_legendas: importedLegends.join('\n'),
+          escala_dados_alunos: importedRegistry,
         });
         
       } catch (error) {
@@ -346,72 +428,43 @@ export default function Home() {
     reader.readAsText(file);
   };
 
+  const handleImportHistory = (file: File) => processImport(file, false);
+  const handleImportFull = (file: File) => processImport(file, true);
+
   const handleClear = () => {
-    const confirmation = prompt('Tem certeza que deseja limpar toda a memória? Esta ação não pode ser desfeita. Digite \'sim\' para confirmar.');
-    if (confirmation === 'sim') {
+    if (confirm('Tem certeza que deseja limpar tudo?')) {
       clearLocalStorage();
-      toast({
-        title: "Memória limpa",
-        description: "Recarregando aplicação...",
-        duration: 2000,
-      });
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
+      window.location.reload();
     }
   };
 
   const handleShutdown = async () => {
-    const confirmation = prompt('Tem certeza que deseja encerrar o servidor e fechar o aplicativo? Digite \'sim\' para confirmar.');
-    if (confirmation === 'sim') {
+    if (confirm('Encerrar servidor?')) {
       try {
         await fetch('/quit');
-        toast({
-          title: "Servidor encerrado",
-          description: "Fechando a janela...",
-        });
-        setTimeout(() => {
-          window.close();
-        }, 1000);
+        window.close();
       } catch (error) {
-        toast({
-          variant: 'destructive',
-          title: 'Erro ao encerrar',
-          description: 'Não foi possível contactar o servidor para desligar.',
-        });
+        console.error(error);
       }
     }
   };
   
-  const femaleStudentsForHighlight = config.femaleStudents
-    .split(';')
-    .map(s => s.trim())
-    .filter(Boolean);
-
+  const femaleStudentsForHighlight = config.femaleStudents.split(';').map(s => s.trim()).filter(Boolean);
   const historicalMonthName = config.historicalMonth !== undefined ? (MONTH_NAMES as string[])[config.historicalMonth] : null;
   const isHistoricalDataLoaded = importedStats !== null;
 
   return (
     <div className="min-h-screen relative overflow-hidden"> 
-      
       <div className="absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
-        {/* CORREÇÃO AQUI: Usando a variável logoSrc */}
-        <img
-          src={logoSrc}
-          alt="Logo PMBA"
-          className="w-[400px] h-auto opacity-10"
-        />
+        <img src={logoSrc} alt="Logo PMBA" className="w-[400px] h-auto opacity-10" />
       </div>
 
       <div className="relative z-10 max-w-full mx-auto px-4 py-8">
-        
         <div className="header-glass text-center mb-4 p-4 rounded-lg shadow-lg">
           <p className="text-xs text-white text-shadow-strong">
             Produzido por: AL SD PM MAURO - 27; AL SD PM FAGNER - 34; AL SD PM BOTELHO - 72;
           </p>
-          <p className="text-xs text-white text-shadow-strong">
-            (2° CIA 2025 - 9° BEIC)
-          </p>
+          <p className="text-xs text-white text-shadow-strong">(2° CIA 2025 - 9° BEIC)</p>
         </div>
 
         <div className="header-glass flex flex-col sm:flex-row justify-between items-center mb-8 p-4 rounded-lg shadow-lg">
@@ -419,31 +472,17 @@ export default function Home() {
             <h1 className="text-3xl font-bold text-white text-shadow-strong" data-testid="title-main">
               Gerador de Escala Mensal
             </h1>
-            <p className="text-lg text-white text-shadow-strong">
-              Polícia Militar da Bahia - 9º BEIC
-            </p>
+            <p className="text-lg text-white text-shadow-strong">Polícia Militar da Bahia - 9º BEIC</p>
             {isHistoricalDataLoaded && historicalMonthName && config.historicalYear && (
               <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-yellow-300 bg-yellow-900/40 p-1.5 rounded-md shadow-md">
                 <History className="w-4 h-4" />
-                <span className="text-shadow-strong">
-                  HISTÓRICO BASE ATIVO: {historicalMonthName.toUpperCase()} / {config.historicalYear}
-                </span>
+                <span className="text-shadow-strong">HISTÓRICO BASE ATIVO: {historicalMonthName.toUpperCase()} / {config.historicalYear}</span>
               </div>
             )}
           </div>
           <div className="flex items-center gap-4 mt-4 sm:mt-0">
-            {/* CORREÇÃO AQUI: Usando a variável logoSrc */}
-            <img 
-              src={logoSrc}
-              alt="Logo PMBA" 
-              className="w-64 h-auto"
-            />
-            <Button 
-              variant="destructive" 
-              size="icon" 
-              onClick={handleShutdown}
-              title="Encerrar Servidor e Fechar App"
-            >
+            <img src={logoSrc} alt="Logo PMBA" className="w-64 h-auto" />
+            <Button variant="destructive" size="icon" onClick={handleShutdown} title="Encerrar">
               <Power className="h-5 w-5" />
             </Button>
           </div>
@@ -453,18 +492,15 @@ export default function Home() {
           <ConfigurationPanel
             onGenerate={handleGenerate}
             onExport={handleExportJSON}
-            onImport={handleImportJSON}
+            onImportHistory={handleImportHistory}
+            onImportFull={handleImportFull}
             onClear={handleClear}
             isGenerating={state.isGenerating}
           />
 
           {state.result && (
             <div id="schedule-view" className="overflow-x-auto">
-              <ScheduleView 
-                result={state.result} 
-                onExportPDF={handleExportPDF} 
-                highlightedStudents={femaleStudentsForHighlight}
-              />
+              <ScheduleView result={state.result} onExportPDF={handleExportPDF} highlightedStudents={femaleStudentsForHighlight} />
             </div>
           )}
 
@@ -478,22 +514,12 @@ export default function Home() {
           {!state.result && !state.error && (
             <Card className="header-glass p-8 text-center rounded-lg shadow-lg">
               <p className="text-base text-white text-shadow-strong">
-                Configurações carregadas.
-                {isHistoricalDataLoaded && historicalMonthName && config.historicalYear && (
-                  <span className="block mt-2 font-semibold text-yellow-300 text-shadow-strong">
-                    Base de Compensação ({historicalMonthName} / {config.historicalYear}) está carregada.
-                  </span>
-                )}
-                <span className="block mt-2">
-                  Clique em <span className="font-semibold">"Gerar Escala"</span> para começar.
-                </span>
+                Configurações carregadas. Clique em <span className="font-semibold">"Gerar Escala"</span> para começar.
               </p>
             </Card>
           )}
 
-          {state.analytics && (
-            <AnalyticsPanel analytics={state.analytics} />
-          )}
+          {state.analytics && <AnalyticsPanel analytics={state.analytics} />}
         </div>
       </div>
     </div>

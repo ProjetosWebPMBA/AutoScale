@@ -1,11 +1,9 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { GenerationResult } from "@shared/schema";
+import type { GenerationResult, StudentData, ManualGroup } from "@shared/schema";
 import { MONTH_NAMES, DAY_INITIALS } from "@shared/schema";
 
-/**
- * Helper para carregar a imagem e obter suas dimensões originais
- */
+// Helper para carregar logo
 const loadImage = (src: string): Promise<{ dataUrl: string; width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -31,17 +29,18 @@ const loadImage = (src: string): Promise<{ dataUrl: string; width: number; heigh
   });
 };
 
-function getBasePostName(rowName: string): string {
-  return rowName.replace(/\s*\d+$/, '').trim().toUpperCase();
-}
-
 export async function exportToPDF(
   result: GenerationResult,
   responsible: string,
   responsiblePosition: string,
   month: number,
   year: number,
-  femaleStudents: string[] 
+  femaleStudents: string[],
+  studentRegistry: StudentData[],
+  manualGroups: ManualGroup[],
+  isGroupMode: boolean,
+  servicePosts: string[],
+  postLegends: string[]
 ): Promise<void> {
   const doc = new jsPDF({
     orientation: 'landscape',
@@ -51,252 +50,367 @@ export async function exportToPDF(
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
+  const daysInMonth = result.daysInMonth;
 
-  // --- 1. CABEÇALHO ---
+  // Margem esquerda padrão para alinhar VISTO e Tabela
+  const marginLeft = 10;
+
+  // --- 1. PREPARAÇÃO DOS DADOS (INVERSÃO DA MATRIZ) ---
+  const studentSchedule: Record<string, Record<number, string>> = {};
   
-  try {
-    // CORREÇÃO: Pega a URL correta dependendo se está no GitHub ou Local
-    const baseUrl = import.meta.env.BASE_URL;
-    const logoPath = `${baseUrl}logo-pmba.png`.replace(/\/\//g, '/');
-    
-    const logoInfo = await loadImage(logoPath);
-    
-    // LÓGICA DE PROPORÇÃO (ASPECT RATIO)
-    const targetWidth = 32; 
-    const aspectRatio = logoInfo.height / logoInfo.width;
-    const targetHeight = targetWidth * aspectRatio;
-
-    doc.addImage(logoInfo.dataUrl, 'PNG', pageWidth - 40, 5, targetWidth, targetHeight); 
-  } catch (e) {
-    console.warn("Logo não carregada no PDF", e);
-  }
-
-  doc.setDrawColor(0); 
-  doc.setLineWidth(0.2);
-  doc.rect(10, 8, 35, 22); 
-
-  doc.setFontSize(8);
-  doc.setFont('times', 'normal'); 
-  doc.text("VISTO", 27.5, 12, { align: 'center' });
-  doc.text("Em _____/_____/_____.", 27.5, 18, { align: 'center' });
-  doc.line(12, 24, 43, 24); 
-  doc.setFontSize(7);
-  doc.text("Cmt da OPM", 27.5, 28, { align: 'center' });
-
-  doc.setFont('times', 'bold'); 
-  doc.setFontSize(11);
-  doc.text("POLÍCIA MILITAR DA BAHIA", pageWidth / 2, 10, { align: 'center' });
-  
-  doc.setFontSize(9);
-  doc.text("CENTRO DE FORMAÇÃO E APERFEIÇOAMENTO DE PRAÇAS", pageWidth / 2, 15, { align: 'center' });
-  doc.text("9º BATALHÃO DE ENSINO, INSTRUÇÃO E CAPACITAÇÃO", pageWidth / 2, 19, { align: 'center' });
-  
-  doc.setFontSize(12);
-  const title = "ESCALA GERAL";
-  const titleWidth = doc.getTextWidth(title);
-  doc.text(title, pageWidth / 2, 25, { align: 'center' });
-  doc.setLineWidth(0.3);
-  doc.line((pageWidth / 2) - (titleWidth / 2), 26, (pageWidth / 2) + (titleWidth / 2), 26);
-
-  doc.setTextColor(200, 0, 0); 
-  doc.text(`${MONTH_NAMES[month].toUpperCase()} ${year}`, pageWidth / 2, 32, { align: 'center' });
-  doc.setTextColor(0, 0, 0); 
-
-  // --- 2. PREPARAÇÃO DOS DADOS ---
-  const { scheduleData, postRows, daysInMonth, ignoredDays } = result;
-
-  const rowInitials = ['DIA']; 
-  const rowNumbers = ['DATA']; 
-  
-  for (let day = 1; day <= daysInMonth; day++) {
-    const date = new Date(year, month, day);
-    const dayOfWeek = date.getDay();
-    rowInitials.push(DAY_INITIALS[dayOfWeek]);
-    rowNumbers.push(String(day).padStart(2, '0'));
-  }
-
-  const head = [
-    [
-      { content: 'LOCAL', rowSpan: 2, styles: { valign: 'middle', halign: 'center', fillColor: [190, 190, 190] } },
-      { content: 'DIA', styles: { halign: 'center', fillColor: [220, 220, 220] } },
-      ...rowInitials.slice(1)
-    ],
-    [
-      { content: 'DATA', styles: { halign: 'center', fillColor: [220, 220, 220] } },
-      ...rowNumbers.slice(1)
-    ]
-  ];
-
-  // --- CONSTRUÇÃO DO CORPO COM LINHAS ESPAÇADORAS ---
-  const body: string[][] = [];
-  let lastBaseName = "";
-
-  postRows.forEach((rowName, index) => {
-    const currentBaseName = getBasePostName(rowName);
-
-    if (index > 0 && currentBaseName !== lastBaseName) {
-      const spacerRow = new Array(daysInMonth + 2).fill('');
-      spacerRow[0] = '__SPACER__'; 
-      body.push(spacerRow);
-    }
-
-    const row = [rowName];
-    row.push(''); 
-    for (let day = 1; day <= daysInMonth; day++) {
-      const cell = scheduleData[rowName][day];
-      row.push(cell?.student || '-');
-    }
-    body.push(row);
-
-    lastBaseName = currentBaseName;
+  const slotsCountMap: Record<string, number> = {};
+  result.postRows.forEach(row => {
+      const base = row.replace(/\s*\d+$/, '').trim().toUpperCase();
+      slotsCountMap[base] = (slotsCountMap[base] || 0) + 1;
   });
 
-  // --- 3. GERAÇÃO DA TABELA ---
-  
-  let isBlueBackground = false; 
-  let currentBlockBaseName = "";
+  const getLegend = (rowName: string) => {
+      const baseName = rowName.replace(/\s*\d+$/, '').trim();
+      const baseNameUpper = baseName.toUpperCase();
+      
+      const index = servicePosts.findIndex(p => p.trim().toUpperCase() === baseNameUpper);
+      const baseLegend = (index >= 0 && postLegends[index]) ? postLegends[index] : baseName.substring(0, 2).toUpperCase();
+      
+      if (slotsCountMap[baseNameUpper] > 1) {
+          const numMatch = rowName.match(/(\d+)$/);
+          const num = numMatch ? numMatch[1] : '1';
+          return `${baseLegend}${num}`;
+      }
+      return baseLegend;
+  };
 
+  result.postRows.forEach(rowName => {
+      const legend = getLegend(rowName);
+      
+      for (let day = 1; day <= daysInMonth; day++) {
+          const cell = result.scheduleData[rowName]?.[day];
+          if (cell && cell.student) {
+              const studentId = cell.student.trim();
+              const normalizedId = String(parseInt(studentId, 10));
+              
+              if (!studentSchedule[normalizedId]) studentSchedule[normalizedId] = {};
+              studentSchedule[normalizedId][day] = legend;
+              
+              if (studentId !== normalizedId) {
+                  if (!studentSchedule[studentId]) studentSchedule[studentId] = {};
+                  studentSchedule[studentId][day] = legend;
+              }
+          }
+      }
+  });
+
+  // --- 2. CABEÇALHO OFICIAL ---
+  
+  // Caixa VISTO (Maximizada)
+  // Largura aumentada para 40mm (era 30mm)
+  // Altura aumentada para 22mm (era 18mm)
+  const vistoWidth = 40;
+  const vistoHeight = 22;
+  const vistoY = 8;
+
+  doc.setLineWidth(0.3);
+  doc.setDrawColor(0);
+  doc.rect(marginLeft, vistoY, vistoWidth, vistoHeight); 
+  
+  // Textos do Visto (Centralizados na nova largura)
+  const vistoCenterX = marginLeft + (vistoWidth / 2);
+  
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'bold');
+  doc.text("VISTO", vistoCenterX, vistoY + 4, { align: 'center' }); // y=12
+  
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.text("Em _____/_____/_____.", vistoCenterX, vistoY + 9, { align: 'center' }); // y=17
+  
+  const lineY = vistoY + 15; // y=23
+  doc.line(marginLeft, lineY, marginLeft + vistoWidth, lineY); // Linha interna mais baixa
+  
+  doc.setFontSize(6);
+  doc.text("Cmt da OPM", vistoCenterX, lineY + 4, { align: 'center' }); // y=27
+
+  // --- LOGOS ---
+  const baseUrl = import.meta.env.BASE_URL;
+  // Altura reduzida para não brigar com o texto (22mm)
+  const logoHeight = 22; 
+  const logoY = 6; 
+  
+  // LOGO 1: PMBA (Esquerda)
+  try {
+    const logoPath = `${baseUrl}logo-pmba.png`.replace(/\/\//g, '/');
+    const logoInfo = await loadImage(logoPath);
+    
+    const ratio = logoInfo.width / logoInfo.height;
+    const targetWidth = logoHeight * ratio; 
+
+    // Posição X: Logo após a caixa de Visto + pequeno gap (2mm)
+    // 10 (margin) + 40 (box) + 2 (gap) = 52
+    const logoX = marginLeft + vistoWidth + 2; 
+
+    doc.addImage(logoInfo.dataUrl, 'PNG', logoX, logoY, targetWidth, logoHeight); 
+  } catch (e) { console.warn("Logo PMBA fail"); }
+
+  // LOGO 2: 9º BEIC (Direita - Simétrica)
+  try {
+    const logo2Path = `${baseUrl}logo-9beic.png`.replace(/\/\//g, '/');
+    const logo2Info = await loadImage(logo2Path);
+    
+    const ratio2 = logo2Info.width / logo2Info.height;
+    const targetWidth2 = logoHeight * ratio2; 
+
+    // Posição X: Simétrica à esquerda (logoX = 52)
+    // Margem direita equivalente: pageWidth - 52 - width
+    const logo2X = pageWidth - (marginLeft + vistoWidth + 2) - targetWidth2;
+
+    doc.addImage(logo2Info.dataUrl, 'PNG', logo2X, logoY, targetWidth2, logoHeight); 
+  } catch (e) { console.warn("Logo 9BEIC fail"); }
+
+
+  // Textos Centrais do Cabeçalho
+  doc.setFont('times', 'bold');
+  const centerX = pageWidth / 2;
+  
+  doc.setFontSize(11);
+  doc.text("POLÍCIA MILITAR DA BAHIA", centerX, 12, { align: 'center' });
+  
+  doc.setFontSize(9);
+  doc.text("CENTRO DE FORMAÇÃO E APERFEIÇOAMENTO DE PRAÇAS", centerX, 16, { align: 'center' });
+  doc.text("9º BATALHÃO DE ENSINO, INSTRUÇÃO E CAPACITAÇÃO", centerX, 20, { align: 'center' });
+  doc.text("CORPO DE ALUNOS", centerX, 24, { align: 'center' });
+
+  // Título (PRETO e SUBLINHADO)
+  doc.setFontSize(12);
+  doc.setTextColor(0, 0, 0); // Preto
+  const title = `ESCALA DE SERVIÇO CFSD ${year} - ${MONTH_NAMES[month].toUpperCase()}/${year}`;
+  doc.text(title, centerX, 33, { align: 'center' });
+  
+  // Desenha o sublinhado
+  const titleWidth = doc.getTextWidth(title);
+  doc.setLineWidth(0.5);
+  doc.line(centerX - (titleWidth / 2), 34, centerX + (titleWidth / 2), 34);
+  doc.setLineWidth(0.1); // Reset linha
+
+  // --- 3. CONSTRUÇÃO DAS LINHAS ---
+  const columns = [
+    { header: 'Nº', dataKey: 'num' },
+    { header: 'GH', dataKey: 'gh' },
+    { header: 'NOME DE GUERRA', dataKey: 'nome' },
+    { header: 'MAT', dataKey: 'mat' },
+  ];
+
+  for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(year, month, d);
+      const dayInitial = DAY_INITIALS[date.getDay()];
+      columns.push({ header: `${d}\n${dayInitial}`, dataKey: `day_${d}` });
+  }
+
+  const body: any[] = [];
+
+  const createStudentRow = (studentId: string) => {
+      const normalizedId = String(parseInt(studentId, 10));
+      const reg = studentRegistry.find(s => s.id === studentId) || studentRegistry.find(s => s.id === normalizedId);
+      
+      const row: any = {
+          num: reg ? reg.id : studentId,
+          gh: reg ? reg.gh : '',
+          // AQUI: Usamos APENAS o Nome de Guerra em Maiúsculo
+          nome: reg && reg.warName && reg.warName !== '?' ? reg.warName.toUpperCase() : "ERRO: S/ GUERRA",
+          mat: reg ? reg.matricula : '',
+      };
+
+      const userSched = studentSchedule[normalizedId] || studentSchedule[studentId] || {};
+      for (let d = 1; d <= daysInMonth; d++) {
+          row[`day_${d}`] = userSched[d] || '';
+      }
+      return row;
+  };
+
+  if (isGroupMode && manualGroups.length > 0) {
+      manualGroups.forEach(group => {
+          body.push({ 
+              num: group.name.toUpperCase(), 
+              gh: '', nome: '', mat: '', 
+              isGroupHeader: true 
+          });
+
+          let memberIds = group.students.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean);
+          memberIds.sort((a, b) => {
+              const numA = parseInt(a, 10);
+              const numB = parseInt(b, 10);
+              if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+              return a.localeCompare(b);
+          });
+
+          memberIds.forEach(id => {
+              body.push(createStudentRow(id));
+          });
+      });
+  } else {
+      const sortedRegistry = [...studentRegistry].sort((a, b) => parseInt(a.id) - parseInt(b.id));
+      sortedRegistry.forEach(reg => {
+          body.push(createStudentRow(reg.id));
+      });
+  }
+
+  // --- 4. GERAÇÃO DA TABELA ---
   autoTable(doc, {
-    startY: 36,
-    head: head,
+    startY: 38, // Ajustado para 38 para dar espaço ao título sublinhado
+    // Usar a mesma margem esquerda do cabeçalho
+    margin: { left: marginLeft },
+    columns: columns,
     body: body,
     theme: 'grid',
     styles: {
-      font: 'helvetica',
       fontSize: 6.5,
-      // -- AJUSTES DE ALTURA AQUI --
-      cellPadding: 1.5,
-      minCellHeight: 5.5,
-      // ----------------------------
-      halign: 'center',
+      cellPadding: 0.8,
       valign: 'middle',
-      lineWidth: 0.3,
+      halign: 'center',
+      lineWidth: 0.1,
       lineColor: [0, 0, 0],
-      textColor: [0, 0, 0]
+      textColor: [0, 0, 0],
+      font: 'helvetica'
     },
     headStyles: {
-      fillColor: [220, 220, 220],
+      fillColor: [255, 255, 255], 
       textColor: [0, 0, 0],
       fontStyle: 'bold',
-      lineWidth: 0.3,
-      lineColor: [0, 0, 0]
+      lineWidth: 0.1,
+      halign: 'center',
+      valign: 'middle'
     },
     columnStyles: {
-      0: { 
-        cellWidth: 45, 
-        halign: 'left',
-        fontStyle: 'bold',
-      },
-      1: {
-        cellWidth: 12, 
-        halign: 'center',
-        fillColor: [245, 245, 245] 
-      }
+      0: { cellWidth: 8, fontStyle: 'bold' }, 
+      1: { cellWidth: 14 }, 
+      2: { cellWidth: 35, halign: 'left', fontStyle: 'bold' }, 
+      3: { cellWidth: 16 }, 
     },
     didParseCell: (data) => {
-      if (data.section === 'body') {
-        const rawRow = data.row.raw as string[];
-        const firstCell = rawRow[0];
+        const { row, column, cell } = data;
 
-        // CASO 1: LINHA ESPAÇADORA
-        if (firstCell === '__SPACER__') {
-            data.cell.styles.minCellHeight = 1.5;
-            data.cell.styles.cellPadding = 0;
-            data.cell.styles.fillColor = [255, 255, 255];
-            data.cell.styles.lineWidth = 0;
-            data.cell.text = [];
-            return; 
-        }
-
-        // CASO 2: LINHA DE DADOS NORMAL
-        if (data.column.index === 0) {
-           const baseName = getBasePostName(firstCell);
-           if (baseName !== currentBlockBaseName) {
-               if (currentBlockBaseName !== "") {
-                   isBlueBackground = !isBlueBackground;
-               }
-               currentBlockBaseName = baseName;
-           }
-        }
-
-        let baseColor: [number, number, number] = isBlueBackground ? [230, 240, 255] : [255, 255, 255];
-
-        if (data.column.index > 1) {
-            const day = data.column.index - 1; 
-            const date = new Date(year, month, day);
-            const dayOfWeek = date.getDay();
-            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-            const isIgnored = ignoredDays.has(day);
-
-            if (isIgnored) {
-                baseColor = [240, 240, 240];
-                data.cell.styles.textColor = [180, 180, 180];
-            } else if (isWeekend) {
-                baseColor = [230, 230, 230];
-            }
-            
-            const cellText = data.cell.raw as string;
-            const isPfem = femaleStudents.some(f => cellText.trim() === f || cellText.includes(f));
-
-            if (isPfem && !isIgnored) {
-                baseColor = [255, 240, 245];
-                data.cell.styles.textColor = [200, 0, 0];
-                data.cell.styles.fontStyle = 'bold';
+        if (row.raw && (row.raw as any).isGroupHeader) {
+            if (column.dataKey === 'num') {
+                cell.colSpan = columns.length;
+                cell.styles.fillColor = [220, 220, 220];
+                cell.styles.halign = 'left';
+                cell.styles.fontStyle = 'bold';
+            } else {
+                cell.styles.display = 'none';
             }
         }
 
-        data.cell.styles.fillColor = baseColor;
-      }
+        if (column.dataKey.toString().startsWith('day_')) {
+            const dayIndex = parseInt(column.dataKey.toString().replace('day_', ''), 10);
+            const date = new Date(year, month, dayIndex);
+            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
 
-      if (data.section === 'head' && data.row.index === 0 && data.column.index > 1) {
-          data.cell.styles.fillColor = [220, 220, 220];
-      }
-    },
-    didDrawCell: (data) => {
-        if (data.section === 'body') {
-            const rawRow = data.row.raw as string[];
-            if (rawRow[0] === '__SPACER__') return;
-
-            const nextRow = data.table.body[data.row.index + 1];
-            const prevRow = data.table.body[data.row.index - 1];
-            
-            const isNextSpacer = nextRow && (nextRow.raw as string[])[0] === '__SPACER__';
-            const isPrevSpacer = prevRow && (prevRow.raw as string[])[0] === '__SPACER__';
-            const isFirstRow = data.row.index === 0;
-            const isLastRow = !nextRow;
-
-            const borderThickness = 0.4; 
-            data.doc.setDrawColor(0);
-            data.doc.setLineWidth(borderThickness);
-
-            if (isLastRow || isNextSpacer) {
-                data.doc.line(data.cell.x, data.cell.y + data.cell.height, data.cell.x + data.cell.width, data.cell.y + data.cell.height);
-            }
-            if (isFirstRow || isPrevSpacer) {
-                data.doc.line(data.cell.x, data.cell.y, data.cell.x + data.cell.width, data.cell.y);
+            if (isWeekend) {
+                const grayLevel = data.section === 'head' ? 200 : 230;
+                cell.styles.fillColor = [grayLevel, grayLevel, grayLevel];
             }
         }
-    },
-    margin: { top: 10, left: 10, right: 10, bottom: 20 },
+    }
   });
 
-  // --- 4. RODAPÉ ---
+  // --- 5. LEGENDA ---
   const finalY = (doc as any).lastAutoTable.finalY || 200;
-  
-  let footerY = finalY + 15;
-  if (footerY > pageHeight - 20) {
+  let currentY = finalY + 5;
+
+  if (currentY > pageHeight - 30) {
       doc.addPage();
-      footerY = 20;
+      currentY = 20;
   }
 
-  doc.setFont('times', 'bold');
-  doc.setFontSize(10);
-  doc.text(responsible.toUpperCase(), pageWidth / 2, footerY, { align: 'center' });
-  
-  doc.setFont('times', 'italic');
-  doc.setFontSize(10);
-  doc.text(responsiblePosition, pageWidth / 2, footerY + 5, { align: 'center' });
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.text("LEGENDA:", marginLeft, currentY); // Alinhado à margem
+  currentY += 4;
 
-  const filename = `escala_${MONTH_NAMES[month].toLowerCase()}_${year}.pdf`;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+
+  let legendX = marginLeft;
+  const legendYStart = currentY;
+  const maxLegendHeight = pageHeight - 40;
+
+  servicePosts.forEach((post, index) => {
+      const sigla = postLegends[index] || post.substring(0, 2).toUpperCase();
+      
+      if (currentY > maxLegendHeight) {
+          currentY = legendYStart;
+          legendX += 70; 
+      }
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(sigla, legendX, currentY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`- ${post}`, legendX + 10, currentY);
+      
+      currentY += 3.5;
+  });
+
+  // --- 6. ASSINATURA (NOME COMPLETO COM GUERRA EM NEGRITO) ---
+  let signY = Math.max(currentY + 15, pageHeight - 35);
+  if (signY > pageHeight - 25) {
+      doc.addPage();
+      signY = pageHeight - 35;
+  }
+
+  doc.setLineWidth(0.2);
+  doc.line(centerX - 50, signY, centerX + 50, signY);
+  
+  // Lógica complexa para desenhar Nome Completo com parte em Negrito centralizado
+  // Agora usando BARRAS /.../
+  const fullRespName = responsible.replace(/\//g, '').toUpperCase(); // Remove barras para o nome completo visual
+  const respWarMatch = responsible.match(/\/(.*?)\//); // Regex para barras
+  const warNameOnly = respWarMatch ? respWarMatch[1].toUpperCase().trim() : null;
+
+  doc.setFontSize(10);
+  const signTextY = signY + 5;
+
+  if (warNameOnly && fullRespName.includes(warNameOnly)) {
+      // Divide o nome: [Antes] [Guerra] [Depois]
+      const parts = fullRespName.split(warNameOnly);
+      const preText = parts[0] || "";
+      const postText = parts.slice(1).join(warNameOnly) || ""; 
+
+      // Calcula larguras para centralizar
+      doc.setFont('helvetica', 'normal');
+      const preWidth = doc.getTextWidth(preText);
+      const postWidth = doc.getTextWidth(postText);
+      
+      doc.setFont('helvetica', 'bold');
+      const warWidth = doc.getTextWidth(warNameOnly);
+      
+      const totalWidth = preWidth + warWidth + postWidth;
+      let cursorX = centerX - (totalWidth / 2);
+
+      // Desenha Parte 1 (Normal)
+      if (preText) {
+        doc.setFont('helvetica', 'normal');
+        doc.text(preText, cursorX, signTextY);
+        cursorX += preWidth;
+      }
+
+      // Desenha Nome de Guerra (Negrito)
+      doc.setFont('helvetica', 'bold');
+      doc.text(warNameOnly, cursorX, signTextY);
+      cursorX += warWidth;
+
+      // Desenha Parte 2 (Normal)
+      if (postText) {
+        doc.setFont('helvetica', 'normal');
+        doc.text(postText, cursorX, signTextY);
+      }
+  } else {
+      doc.setFont('helvetica', 'bold');
+      doc.text(fullRespName, centerX, signTextY, { align: 'center' });
+  }
+  
+  // Cargo em Itálico
+  doc.setFont('times', 'italic'); 
+  doc.setFontSize(10);
+  doc.text(responsiblePosition, centerX, signY + 10, { align: 'center' });
+
+  const filename = `escala_oficial_${MONTH_NAMES[month].toLowerCase()}_${year}.pdf`;
   doc.save(filename);
 }

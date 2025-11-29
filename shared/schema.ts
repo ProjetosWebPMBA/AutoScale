@@ -1,11 +1,20 @@
 // Este arquivo define os tipos de dados e as regras de negócio
 
 // --- CONFIGURAÇÃO ---
+export interface StudentData {
+  id: string;      // O "Número" (Ex: 1, 01, 74)
+  gh: string;      // Grau Hierárquico (Ex: Al Sd PM)
+  name: string;    // Nome Completo LIMPO (sem os traços)
+  warName: string; // Apenas o Nome de Guerra (extraído dos traços)
+  matricula: string; // Matrícula
+  originalInput?: string; // O texto original com hifens para edição
+}
+
 export interface GenerationConfig {
-  // ALTERADO (v9): Permite string (texto bruto) OU string[] (já processado)
   students: string | string[]; 
+  studentRegistry: StudentData[]; // Registro detalhado
   servicePosts: string[];
-  postLegends: string[]; // NOVO: Legendas/Siglas dos postos
+  postLegends: string[]; // Siglas
   slots: number[];
   month: number;
   year: number;
@@ -19,7 +28,6 @@ export interface GenerationConfig {
   historicalMonth?: number; 
   historicalYear?: number;  
 
-  // Modo de Grupos Manuais
   isGroupMode: boolean; 
   manualGroups: ManualGroup[]; 
 }
@@ -84,7 +92,7 @@ export interface ExportData {
   tipo: "configuracao_escala_pm";
   dataExportacao: string;
   escala_postos: string;
-  escala_legendas: string; // NOVO
+  escala_legendas: string;
   escala_vagas: string;
   escala_responsavel: string;
   escala_cargo_responsavel: string;
@@ -93,6 +101,8 @@ export interface ExportData {
   escala_alunos: string;
   escala_alunos_count: string;
   escala_alunos_excluidos: string;
+  escala_dados_alunos?: StudentData[];
+  
   escala_turmas_count: string;
   escala_alunas_pfem: string;
   escala_alunas_restricoes: string;
@@ -102,16 +112,21 @@ export interface ExportData {
   
   escala_modo_grupos?: string; 
   escala_grupos_manuais?: ManualGroup[];
+
+  // NOVO: Guarda o resultado gerado (a grade pronta) para reabertura
+  snapshot_resultado?: any; // Usamos 'any' aqui para facilitar a serialização do Set
+  snapshot_analise?: AnalyticsResult;
 }
 
 export type LocalStorageData = {
-  [K in keyof Omit<ExportData, 'tipo' | 'dataExportacao' | 'escala_stats_compensacao' | 'escala_mes_historico' | 'escala_ano_historico' | 'escala_grupos_manuais'>]: string | undefined;
+  [K in keyof Omit<ExportData, 'tipo' | 'dataExportacao' | 'escala_stats_compensacao' | 'escala_mes_historico' | 'escala_ano_historico' | 'escala_grupos_manuais' | 'escala_dados_alunos' | 'snapshot_resultado' | 'snapshot_analise'>]: string | undefined;
 } & {
   escala_dias_ignorar?: string;
   escala_stats_compensacao?: StudentStats[];
   escala_mes_historico?: number;
   escala_ano_historico?: number;
   escala_grupos_manuais?: ManualGroup[]; 
+  escala_dados_alunos?: StudentData[]; 
 };
 
 export const MONTH_NAMES = [

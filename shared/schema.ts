@@ -77,6 +77,8 @@ export interface StudentStats {
   postBreakdown: Record<string, number>;
   accumulatedServices: number;
   accumulatedPostCounts: Record<string, number>;
+  // ADICIONADO: Campo crucial para continuidade da folga entre meses
+  consecutiveDaysOff?: number; 
 }
 
 export interface AnalyticsResult {

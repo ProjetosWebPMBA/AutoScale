@@ -24,6 +24,8 @@ const STORAGE_KEYS = {
   FEMALE_RESTRICTIONS: 'escala_alunas_restricoes',
   IS_GROUP_MODE: 'escala_modo_grupos',
   MANUAL_GROUPS: 'escala_grupos_manuais',
+  // NOVA CHAVE: Permite salvar o estado exato da escala (filas e índices)
+  SNAPSHOT_RESULT: 'snapshot_resultado', 
 } as const;
 
 export function loadFromLocalStorage(): LocalStorageData {
@@ -69,6 +71,18 @@ export function loadFromLocalStorage(): LocalStorageData {
       console.error("Erro ao ler dados detalhados dos alunos", e);
     }
   }
+
+  // NOVO: Carregar o snapshot (estado das filas e memória de dias)
+  const snapshotJson = localStorage.getItem(STORAGE_KEYS.SNAPSHOT_RESULT);
+  if (snapshotJson) {
+    try {
+      // Usamos 'any' aqui caso a interface LocalStorageData ainda não tenha o campo definido,
+      // mas garantimos que o dado seja carregado para o estado da aplicação.
+      (data as any).snapshot_resultado = JSON.parse(snapshotJson);
+    } catch (e) {
+      console.error("Erro ao ler snapshot da escala", e);
+    }
+  }
   
   return data;
 }
@@ -79,7 +93,7 @@ export function saveToLocalStorage(data: Partial<LocalStorageData>): void {
   for (const key in dataToSave) {
     const k = key as keyof typeof dataToSave;
     if (dataToSave[k] !== undefined) {
-      // Ignora campos de snapshot ou stats no localStorage puro (apenas config)
+      // Ignora campos de stats no localStorage puro
       if (k === 'escala_stats_compensacao') continue;
       
       const value = dataToSave[k];
@@ -89,6 +103,9 @@ export function saveToLocalStorage(data: Partial<LocalStorageData>): void {
          localStorage.setItem(STORAGE_KEYS.MANUAL_GROUPS, JSON.stringify(value));
       } else if (key === 'escala_dados_alunos') {
          localStorage.setItem(STORAGE_KEYS.STUDENT_REGISTRY, JSON.stringify(value));
+      // NOVO: Salvar o snapshot explicitamente
+      } else if (key === 'snapshot_resultado') {
+         localStorage.setItem(STORAGE_KEYS.SNAPSHOT_RESULT, JSON.stringify(value));
       } else if (typeof value === 'number') {
         localStorage.setItem(storageKey as string, String(value));
       } else if (typeof value === 'string') {
@@ -135,7 +152,8 @@ export function createExportData(
   if (snapshotResult) {
       serializedResult = {
           ...snapshotResult,
-          ignoredDays: Array.from(snapshotResult.ignoredDays) // Set para Array
+          // Converte Set para Array para salvar no JSON
+          ignoredDays: Array.from(snapshotResult.ignoredDays || []) 
       };
   }
 
@@ -185,6 +203,10 @@ export function parseImportedJSON(content: string): ExportData {
 }
 
 export function applyImportedData(data: ExportData): LocalStorageData {
+  // ATENÇÃO: É necessário retornar 'snapshot_resultado' para restaurar
+  // o estado das filas (studentQueues) e índices (queueIndices).
+  // Sem isso, a escala reinicia do zero a cada importação.
+  
   return {
     escala_alunos: data.escala_alunos || undefined,
     escala_postos: data.escala_postos || undefined,
@@ -204,6 +226,10 @@ export function applyImportedData(data: ExportData): LocalStorageData {
     escala_ano_historico: data.escala_ano_historico,
     escala_modo_grupos: data.escala_modo_grupos,
     escala_grupos_manuais: data.escala_grupos_manuais,
-    escala_dados_alunos: data.escala_dados_alunos
-  };
+    escala_dados_alunos: data.escala_dados_alunos,
+    
+    // CORREÇÃO CRUCIAL: Passar o snapshot importado para o state do app
+    // Casting 'any' caso o tipo LocalStorageData não tenha o campo definido ainda no schema.ts
+    snapshot_resultado: data.snapshot_resultado 
+  } as LocalStorageData;
 }

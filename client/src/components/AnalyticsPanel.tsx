@@ -165,8 +165,8 @@ export function AnalyticsPanel({ analytics, highlightedStudents = [] }: Analytic
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-medium text-foreground">Estatísticas por Aluno</h3>
           {highlightedStudents.length > 0 && (
-            <div className="text-xs flex items-center gap-2 bg-red-50/80 px-2 py-1 rounded border border-red-200 text-red-700">
-              <span className="w-2 h-2 bg-red-400 rounded-full"></span>
+            <div className="text-xs flex items-center gap-2 bg-pink-100 px-2 py-1 rounded border border-pink-300 text-pink-800">
+              <span className="w-2 h-2 bg-red-500 rounded-full"></span>
               PFem (Destaque)
             </div>
           )}
@@ -194,10 +194,11 @@ export function AnalyticsPanel({ analytics, highlightedStudents = [] }: Analytic
                   <tr 
                     key={stats.student} 
                     data-testid={`stats-row-${stats.student}`} 
-                    className={`hover:bg-muted/50 transition-colors ${isPfem ? 'bg-red-50/60 dark:bg-red-900/20' : ''}`}
+                    className={`hover:bg-muted/50 transition-colors ${isPfem ? 'bg-pink-100 dark:bg-pink-900/40' : ''}`}
                   >
                     <td className="border border-border px-3 py-2 font-medium">
                       {stats.student}
+                      {/* ESTRELA VERMELHA */}
                       {isPfem && <span className="ml-1.5 text-[10px] text-red-500 font-bold">★</span>}
                     </td>
                     <td className="border border-border px-3 py-2 text-center">

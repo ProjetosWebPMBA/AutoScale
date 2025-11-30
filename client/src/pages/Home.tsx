@@ -519,7 +519,13 @@ export default function Home() {
             </Card>
           )}
 
-          {state.analytics && <AnalyticsPanel analytics={state.analytics} />}
+          {/* ADICIONADO: Passando a lista de PFems para destacar */}
+          {state.analytics && (
+            <AnalyticsPanel 
+              analytics={state.analytics} 
+              highlightedStudents={femaleStudentsForHighlight}
+            />
+          )}
         </div>
       </div>
     </div>

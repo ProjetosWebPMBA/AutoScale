@@ -17,6 +17,8 @@ type ExtendedConfig = GenerationConfig & {
   femaleRestrictedPostsList?: string[]; 
   manualGroups?: ManualGroup[];
   isGroupMode?: boolean;
+  // Permite forçar um início se necessário, mas o sistema tentará inferir
+  initialGroupIndex?: number;
 };
 
 // Função Wrapper que decide qual motor usar
@@ -34,7 +36,28 @@ export function generateSchedule(
 }
 
 /**
- * MOTOR NOVO (v4): Modo de Grupos Manuais com Balanceamento Interno Justo e Intercalação
+ * Helper para encontrar estatísticas ignorando zeros à esquerda (Ex: "02" == "2")
+ */
+function findStatsForStudent(studentId: string, stats: StudentStats[] | null): StudentStats | undefined {
+    if (!stats) return undefined;
+    
+    // Tenta busca exata (string)
+    const exact = stats.find(s => s.student === studentId);
+    if (exact) return exact;
+
+    // Tenta busca numérica
+    const targetNum = parseInt(studentId, 10);
+    if (!isNaN(targetNum)) {
+        return stats.find(s => {
+            const sNum = parseInt(s.student, 10);
+            return !isNaN(sNum) && sNum === targetNum;
+        });
+    }
+    return undefined;
+}
+
+/**
+ * MOTOR NOVO (v6): Modo de Grupos Manuais com MEMÓRIA DE CICLO AUTOMÁTICA
  */
 function generateGroupSchedule(
   config: ExtendedConfig, 
@@ -42,7 +65,7 @@ function generateGroupSchedule(
   initialStats: StudentStats[] | null 
 ): GenerationResult {
   
-  console.log("--- EXECUTANDO MOTOR (MODO GRUPOS v4 - BALANCEAMENTO JUSTO) ---");
+  console.log("--- EXECUTANDO MOTOR (MODO GRUPOS v6 - CICLO CONTÍNUO) ---");
 
   const { 
     servicePosts, slots, month, year, ignoredDays = [],
@@ -61,12 +84,8 @@ function generateGroupSchedule(
   
   const scheduleData: Record<string, Record<number, ScheduleCell>> = {};
   const postRows: string[] = [];
-  
-  // Estrutura para o "Map" de contagem de postos por aluno (Justiça)
-  // studentId -> { "SENTINELA": 2, "RANCHO": 0 }
   const postCountMap = new Map<string, Record<string, number>>();
   
-  // Inicializa contadores com dados históricos ou zero
   const allStudentsInGroups = new Set<string>();
   manualGroups.forEach(g => {
       g.students.split(/[\n;,]+/).forEach(s => {
@@ -76,7 +95,7 @@ function generateGroupSchedule(
   });
 
   allStudentsInGroups.forEach(student => {
-      const imported = initialStats?.find(s => s.student === student);
+      const imported = findStatsForStudent(student, initialStats);
       const counts: Record<string, number> = {};
       servicePosts.forEach(p => {
           counts[p.toUpperCase()] = imported?.accumulatedPostCounts?.[p.toUpperCase()] || 0;
@@ -84,16 +103,49 @@ function generateGroupSchedule(
       postCountMap.set(student, counts);
   });
 
-  // --- 2. INTERCALAÇÃO DE POSTOS (MIXING) ---
-  // Objetivo: Criar uma lista "F5, A1, F1, E1..." para distanciar funções iguais
+  // --- 2. INFERÊNCIA DE CICLO (O SEGREDO DA MEMÓRIA) ---
+  // Descobre qual grupo deve começar baseando-se em quem trabalhou "ontem" (mês passado)
+  
+  let inferredStartIndex = 0; // Padrão: Começa do Grupo 1 (Index 0)
+  
+  if (initialStats && initialStats.length > 0) {
+      let lastGroupWorkedIndex = -1;
+
+      // Verifica cada grupo para ver se trabalhou no último dia do mês anterior
+      for (let i = 0; i < manualGroups.length; i++) {
+          const grp = manualGroups[i];
+          const members = grp.students.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean);
+          
+          // Se alguém do grupo tem 0 dias de folga, significa que trabalhou no encerramento anterior
+          const groupWorkedYesterday = members.some(m => {
+              const st = findStatsForStudent(m, initialStats);
+              return st && st.consecutiveDaysOff === 0;
+          });
+
+          if (groupWorkedYesterday) {
+              lastGroupWorkedIndex = i;
+          }
+      }
+
+      if (lastGroupWorkedIndex !== -1) {
+          // Se o Grupo X trabalhou, o próximo é X + 1
+          inferredStartIndex = (lastGroupWorkedIndex + 1) % manualGroups.length;
+          console.log(`Memória de Ciclo: Grupo Anterior foi '${manualGroups[lastGroupWorkedIndex].name}'. Iniciando Mês com '${manualGroups[inferredStartIndex].name}'.`);
+          warnings.push(`Continuidade Detectada: Iniciando escala com ${manualGroups[inferredStartIndex].name}.`);
+      }
+  }
+
+  // Usa a inferência, a menos que haja um override manual (config futura)
+  let groupIndex = config.initialGroupIndex ?? inferredStartIndex;
+
+  // --- 3. CONFIGURAÇÃO DE VAGAS ---
   
   const cycleTargetBase = cyclePostToRemove?.toUpperCase().trim();
   let largestPostBase = "";
   let maxSlotsFound = -1;
 
-  // Agrupamos as vagas por tipo de posto para poder intercalar
   const postsByType: Record<string, Array<{ rowName: string, baseName: string, isRestricted: boolean }>> = {};
-  const basePostNamesOrder: string[] = []; // Para manter a ordem de prioridade de criação
+  const basePostNamesOrder: string[] = []; 
 
   for (let i = 0; i < servicePosts.length; i++) {
     const postName = servicePosts[i].toUpperCase();
@@ -119,7 +171,6 @@ function generateGroupSchedule(
       }
     }
     
-    // Init matriz
     if(numSlots > 1) {
         for(let k=1; k<=numSlots; k++) scheduleData[`${postName} ${k}`] = {};
     } else {
@@ -129,12 +180,9 @@ function generateGroupSchedule(
 
   const cutTargetBase = (isCycleEnabled && cycleTargetBase) ? cycleTargetBase : largestPostBase;
 
-  // Algoritmo de Intercalação (Round Robin)
-  // Pega 1 vaga do Posto A, 1 do Posto B, 1 do C... depois 2ª do A, 2ª do B...
   const interleavedPosts: { rowName: string, baseName: string, isRestricted: boolean }[] = [];
   let hasMore = true;
   let round = 0;
-  
   while (hasMore) {
       hasMore = false;
       for (const baseName of basePostNamesOrder) {
@@ -147,30 +195,19 @@ function generateGroupSchedule(
       round++;
   }
 
-  // --- 3. ORDENAÇÃO CONDICIONAL (FINAL) ---
-  // O Intercalado é bom, mas a regra do "Corte" e "Restrição" tem precedência.
-  // Então reordenamos o 'interleavedPosts' apenas para garantir segurança.
-  
-  // Função helper para reordenar dinamicamente a cada dia
   const getDailyFillOrder = (hasEnoughPeople: boolean) => {
-      // Copia a lista intercalada para preservar a mistura natural
       const list = [...interleavedPosts];
-      
       return list.sort((a, b) => {
           if (hasEnoughPeople) {
-             // Prioridade: Restritos no TOPO (para garantir homens)
-             // O resto mantém a ordem intercalada (estável)
              if (a.isRestricted && !b.isRestricted) return -1;
              if (!a.isRestricted && b.isRestricted) return 1;
              return 0; 
           } else {
-             // Falta gente: Alvo de Corte no FUNDO
              const aIsCutTarget = a.baseName === cutTargetBase;
              const bIsCutTarget = b.baseName === cutTargetBase;
              if (aIsCutTarget && !bIsCutTarget) return 1; 
              if (!aIsCutTarget && bIsCutTarget) return -1;
              
-             // Restritos no TOPO (do que sobrou)
              if (a.isRestricted && !b.isRestricted) return -1;
              if (!a.isRestricted && b.isRestricted) return 1;
              return 0;
@@ -181,7 +218,20 @@ function generateGroupSchedule(
   // --- 4. LOOP DOS DIAS ---
   const allDays: ScheduleDay[] = [];
   const studentLastPost: Map<string, string> = new Map(); 
-  let groupIndex = 0;
+  
+  // MAPAS DE FOLGA E DESCANSO
+  const consecutiveDaysOffMap = new Map<string, number>();
+  // Inicializa folgas com base no histórico
+  allStudentsInGroups.forEach(student => {
+      const imported = findStatsForStudent(student, initialStats);
+      let initialOff = 10; 
+      if (imported && typeof imported.consecutiveDaysOff === 'number') {
+          initialOff = imported.consecutiveDaysOff;
+      }
+      consecutiveDaysOffMap.set(student, initialOff);
+  });
+
+  const MIN_REST_DAYS = 1; // Mínimo 1 dia de folga para não dobrar
   
   for (let day = 1; day <= daysInMonth; day++) {
     const date = new Date(year, month, day);
@@ -190,36 +240,55 @@ function generateGroupSchedule(
 
     if (ignoredDaysSet.has(day)) {
       postRows.forEach(row => scheduleData[row][day] = { student: null, isWeekend, isIgnoredDay: true });
+      allStudentsInGroups.forEach(s => {
+          consecutiveDaysOffMap.set(s, (consecutiveDaysOffMap.get(s) || 0) + 1);
+      });
       continue;
+    }
+
+    // --- ROTAÇÃO INTELIGENTE (Segurança) ---
+    // Se, por algum motivo, o grupo da vez estiver TODO cansado (ex: importação manual errada)
+    // pulamos para o próximo para não deixar buraco na escala.
+    if (day === 1) {
+        const checkIndex = groupIndex % manualGroups.length;
+        const checkGroup = manualGroups[checkIndex];
+        const checkMembers = checkGroup.students.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean);
+        const checkEligible = checkMembers.filter(s => {
+             const daysOff = consecutiveDaysOffMap.get(s) || 0;
+             return daysOff >= MIN_REST_DAYS;
+        });
+
+        if (checkEligible.length === 0) {
+            // Se o grupo inferido estiver cansado, avança mais um.
+            groupIndex++; 
+        }
     }
 
     const currentGroup = manualGroups[groupIndex % manualGroups.length];
     groupIndex++;
 
-    // Lista de alunos do dia (sem duplicatas)
     const rawMembers = currentGroup.students.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean);
     const studentsInGroup = Array.from(new Set(rawMembers));
 
-    if (studentsInGroup.length === 0) {
-      warnings.push(`Dia ${day}: ${currentGroup.name} está vazio.`);
-    }
+    // FILTRO DE FOLGA MÍNIMA
+    const eligibleStudents = studentsInGroup.filter(s => {
+        const daysOff = consecutiveDaysOffMap.get(s) || 0;
+        return daysOff >= MIN_REST_DAYS;
+    });
 
-    // --- PREPARAÇÃO DA LISTA DE CANDIDATOS (Com "Shuffle" suave inicial) ---
-    // Não usamos shuffle puro mais. A ordem será decidida vaga a vaga baseada no histórico.
-    const availableStudents = [...studentsInGroup];
+    const availableStudents = [...eligibleStudents];
     
-    // Verificação de quantidade
     const totalSlotsNeeded = interleavedPosts.length;
-    const hasEnoughPeople = studentsInGroup.length >= totalSlotsNeeded;
+    const hasEnoughPeople = eligibleStudents.length >= totalSlotsNeeded;
 
     if (!hasEnoughPeople) {
-      const msg = `Dia ${day}: ${currentGroup.name} (${studentsInGroup.length}) < Vagas. Corte em: ${cutTargetBase}.`;
+      const msg = `Dia ${day}: ${currentGroup.name} (Disp: ${eligibleStudents.length}) < Vagas. Corte em: ${cutTargetBase}.`;
       if (!warnings.includes(msg)) warnings.push(msg);
     }
 
     const fillOrder = getDailyFillOrder(hasEnoughPeople);
+    const workedToday = new Set<string>();
 
-    // --- PREENCHIMENTO VAGA A VAGA ---
     for (const postSlot of fillOrder) {
       const { rowName, baseName, isRestricted } = postSlot;
 
@@ -228,7 +297,6 @@ function generateGroupSchedule(
         continue;
       }
 
-      // 1. Filtra elegíveis (gênero)
       let candidates = availableStudents;
       if (isRestricted) {
          candidates = availableStudents.filter(s => !femaleStudentsList.some(f => s.includes(f)));
@@ -239,46 +307,49 @@ function generateGroupSchedule(
          continue;
       }
 
-      // 2. ORDENAÇÃO POR JUSTIÇA (Quem tirou menos esse posto?)
-      // Critérios:
-      // A. Menor contagem acumulada deste posto específico.
-      // B. Não ter tirado esse posto ontem (evita dobra de função).
-      // C. Aleatório (para desempatar quem tem contagem igual).
       candidates.sort((a, b) => {
-          // A
           const countA = postCountMap.get(a)?.[baseName] || 0;
           const countB = postCountMap.get(b)?.[baseName] || 0;
           if (countA !== countB) return countA - countB;
 
-          // B
           const lastA = studentLastPost.get(a) === baseName ? 1 : 0;
           const lastB = studentLastPost.get(b) === baseName ? 1 : 0;
-          if (lastA !== lastB) return lastA - lastB; // Quem não tirou vem primeiro (0 < 1)
+          if (lastA !== lastB) return lastA - lastB; 
 
-          // C
           return 0.5 - Math.random();
       });
 
-      // O vencedor é o primeiro da lista
       const selectedStudent = candidates[0];
+      workedToday.add(selectedStudent);
 
-      // Atualiza contadores e histórico
       const currentCounts = postCountMap.get(selectedStudent) || {};
       currentCounts[baseName] = (currentCounts[baseName] || 0) + 1;
       postCountMap.set(selectedStudent, currentCounts);
       
       studentLastPost.set(selectedStudent, baseName);
 
-      // Remove da lista de disponíveis do dia
       const indexInAvailable = availableStudents.indexOf(selectedStudent);
       if (indexInAvailable > -1) {
         availableStudents.splice(indexInAvailable, 1);
       }
 
-      // Grava na escala
       scheduleData[rowName][day] = { student: selectedStudent, isWeekend, isIgnoredDay: false };
     }
+
+    // Atualiza contadores de folga
+    allStudentsInGroups.forEach(s => {
+        if (workedToday.has(s)) {
+            consecutiveDaysOffMap.set(s, 0); 
+        } else {
+            consecutiveDaysOffMap.set(s, (consecutiveDaysOffMap.get(s) || 0) + 1); 
+        }
+    });
   }
+
+  // PREPARA O ESTADO FINAL PARA O PRÓXIMO MÊS
+  // Salvamos em queueIndices qual seria o PRÓXIMO grupo a trabalhar
+  // (Isso ajuda em debug, embora a inferência automática cuide do resto)
+  const nextGroupIndex = groupIndex % manualGroups.length;
 
   return {
     scheduleData,
@@ -287,8 +358,8 @@ function generateGroupSchedule(
     allDays,
     postRows,
     ignoredDays: ignoredDaysSet,
-    studentQueues: { A:[], B:[], C:[] }, 
-    queueIndices: { A:0, B:0, C:0 }, 
+    studentQueues: { "LastGroup": [manualGroups[(groupIndex - 1) % manualGroups.length].name] }, 
+    queueIndices: { "NextGroupIndex": nextGroupIndex }, 
     warnings
   };
 }
@@ -395,7 +466,7 @@ function generateStandardSchedule(
       queues[className].push(student);
     }
     
-    const importedStats = initialStats?.find(s => s.student === student);
+    const importedStats = findStatsForStudent(student, initialStats);
     const initialTotalServices = importedStats?.accumulatedServices || 0;
     
     totalShiftCountMap.set(student, initialTotalServices); 
@@ -407,7 +478,14 @@ function generateStandardSchedule(
       studentPostRecord[postName] = initialPostCount;
     }
     postCountMap.set(student, studentPostRecord);
-    consecutiveDaysOffMap.set(student, MIN_DAYS_OFF_BASE + 5); 
+    
+    let initialConsecutiveOff = MIN_DAYS_OFF_BASE + 5; 
+    if (importedStats && typeof importedStats.consecutiveDaysOff === 'number') {
+        initialConsecutiveOff = importedStats.consecutiveDaysOff;
+        console.log(`Aluno ${student} inicia com ${initialConsecutiveOff} dias de folga (Histórico).`);
+    }
+
+    consecutiveDaysOffMap.set(student, initialConsecutiveOff); 
     lastPostMap.set(student, null);
     restBalanceMap.set(student, 0);
   }
@@ -811,7 +889,8 @@ export function computeAnalytics(result: GenerationResult, config: ExtendedConfi
     }
 
     allStudentsList.forEach(student => {
-      const importedStats = initialStats?.find((s:any) => s.student === student);
+      // USANDO HELPER AQUI TAMBÉM
+      const importedStats = findStatsForStudent(student, initialStats);
       const initialTotalServices = importedStats?.accumulatedServices || 0;
       const initialPostCounts: Record<string, number> = {};
       servicePosts.forEach(post => {
@@ -825,7 +904,8 @@ export function computeAnalytics(result: GenerationResult, config: ExtendedConfi
         totalDaysOff: 0, 
         postBreakdown: initialPostCounts,
         accumulatedServices: initialTotalServices,
-        accumulatedPostCounts: { ...initialPostCounts }, 
+        accumulatedPostCounts: { ...initialPostCounts },
+        consecutiveDaysOff: 0 // Será calculado abaixo
       });
     });
   
@@ -873,7 +953,31 @@ export function computeAnalytics(result: GenerationResult, config: ExtendedConfi
       const shiftsThisMonth = stats.totalShifts - stats.accumulatedServices;
       stats.totalDaysOff = workingDays - shiftsThisMonth;
     });
-  
+    
+    // --- NOVO CÁLCULO: CONSECUTIVE DAYS OFF NO FINAL DO MÊS ---
+    // Conta de trás para frente quantos dias o aluno NÃO trabalhou até o fim do mês
+    for (const student of allStudentsList) {
+        let streak = 0;
+        // Loop reverso: do último dia até o dia 1
+        for (let d = result.daysInMonth; d >= 1; d--) {
+            let workedToday = false;
+            // Varre todos os postos para ver se o aluno estava neles neste dia
+            for (const row of postRows) {
+                if (scheduleData[row]?.[d]?.student === student) {
+                    workedToday = true;
+                    break;
+                }
+            }
+            if (workedToday) break; // Interrompe se trabalhou
+            streak++; // Se não trabalhou, incrementa a folga
+        }
+        
+        const stats = statsMap.get(student);
+        if (stats) {
+            stats.consecutiveDaysOff = streak;
+        }
+    }
+
     const studentStats = Array.from(statsMap.values());
     const shiftsThisMonth = studentStats.reduce((sum, stats) => sum + (stats.totalShifts - stats.accumulatedServices), 0);
     const averageShifts = allStudentsList.length > 0 ? shiftsThisMonth / allStudentsList.length : 0;

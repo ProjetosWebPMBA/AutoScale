@@ -373,7 +373,7 @@ function generateStandardSchedule(
   initialStats: StudentStats[] | null 
 ): GenerationResult {
   
-  console.log("--- EXECUTANDO MOTOR v45 (Variância Zero + Anti-Dobra + Degradação Suave) ---");
+  console.log("--- EXECUTANDO MOTOR v46 (Variância Zero + Anti-Dobra + Distribuição PFem Otimizada) ---");
   
   const { 
     students, servicePosts, slots, month, year, ignoredDays = [],
@@ -545,6 +545,13 @@ function generateStandardSchedule(
     shuffleArray(pfemEligibleRows);
 
     for (const post of pfemEligibleRows) {
+        // DISTRIBUIÇÃO MELHORADA DE PFEMS
+        // Se já atingimos o teto diário de mulheres, paramos de forçar a escalação delas nestes postos.
+        // Isso evita que todas sejam escaladas no mesmo dia (agrupamento/clumping).
+        if (pfemsAssignedToday >= MAX_PFEMS_PER_DAY && !isFinalDays) {
+            continue;
+        }
+
         const isPfemLimitReached = (pfemsAssignedToday >= MAX_PFEMS_PER_DAY && !isFinalDays);
 
         const pfemCandidate = tryFindStudentForPost(
